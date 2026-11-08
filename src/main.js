@@ -60,7 +60,7 @@ function makeModel(team) {
     pivot.add(mesh(G.leg, M.pants, 0, -0.4, 0)); body.add(pivot); legs.push(pivot);
   }
   // upper body turns with where the player looks; legs follow the body heading
-  const upper = new THREE.Group(); body.add(upper);
+  const upper = new THREE.Group(); upper.rotation.order = 'YXZ'; body.add(upper);
   const torso = mesh(G.torso, M.jersey[team], 0, 1.15, 0); torso.scale.z = 1.12; upper.add(torso);
   upper.add(mesh(G.head, M.skin, 0, 1.58, 0));
   upper.add(mesh(G.mask, M.mask, 0.1, 1.56, 0));
@@ -105,7 +105,7 @@ function makePlayers() {
     players.push({
       team, i, human: team === 0 && i === 1, name: TEAMS[team].names[i], model,
       x: 0, z: 0, ang: 0, bodyAng: 0, pitch: 0, h: H_STAND, crouch: false, alive: true,
-      diveT: 0, diveCd: 0, diveDir: 0, queued: 0, crouchOn: false, cWas: false, spaceWas: false,
+      diveT: 0, diveCd: 0, diveDir: 0, queued: 0, crouchOn: false, cWas: false, spaceWas: false, lean: 0,
       ammo: 20, mag: 20, reload: 0, reloadT: 1.6, cd: 0, cool: 0.3, spread: 1, ballSpeed: 46, kills: 0,
       vx: 0, vz: 0, mvx: 0, mvz: 0, phase: 0, moving: false, sprint: false,
       goal: null, goalT: 0, seen: 0, tgt: null, td: 0, scanT: 0, strafe: 1, strafeT: 0, stuckT: 0, lx: 0, lz: 0, avoid: 1, hold: false,
@@ -119,7 +119,7 @@ function resetPlayers() {
   for (const p of players) {
     p.x = p.team ? 22.5 : -22.5; p.z = -4.5 + p.i * 3;
     p.ang = p.bodyAng = p.team ? Math.PI : 0; p.pitch = 0;
-    p.diveT = 0; p.diveCd = 0; p.queued = 0; p.crouchOn = false;
+    p.diveT = 0; p.diveCd = 0; p.queued = 0; p.crouchOn = false; p.lean = 0;
     p.alive = true; p.crouch = false; p.h = H_STAND; p.ammo = p.mag; p.reload = 0; p.cd = 0;
     p.vx = p.vz = p.mvx = p.mvz = 0;
     p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z;
@@ -144,8 +144,14 @@ function losClear(ax, ay, az, bx, by, bz) {
   ray.set(v1, v2.divideScalar(len)); ray.near = 0; ray.far = len;
   return ray.intersectObjects(world.bunkerMeshes, false).length === 0;
 }
-const eyeY = (p) => p.h * 0.9;
+const eyeY = (p) => p.h * 0.9 - Math.abs(p.lean) * 0.05;
 const chestY = (p) => p.h * 0.72;
+const LEAN_DIST = 0.42; // metres the head moves sideways at full lean
+// sideways shift of a player's upper body (k scales it: 1 at the eyes, ~0.8 at the chest)
+function leanOffset(p, k = 1) {
+  const d = p.lean * LEAN_DIST * k;
+  return { x: -Math.sin(p.ang) * d, z: Math.cos(p.ang) * d };
+}
 function move(p, dx, dz) { p.x += dx; p.z += dz; resolveCircle(p, PR); }
 
 // ---------- balls ----------
@@ -186,10 +192,14 @@ function updateBalls(dt) {
     if (state === 'playing') {
       for (const p of players) {
         if (!p.alive || p.team === b.team) continue;
-        const t = segCircle(p0.x, p0.z, p0.x + seg.x, p0.z + seg.z, p.x, p.z, PR + 0.04);
-        if (t >= 0 && t < tBest) {
-          const y = p0.y + seg.y * t;
-          if (y >= 0 && y <= p.h + 0.05) { tBest = t; kind = 'player'; hitP = p; point = p0.clone().addScaledVector(seg, t); }
+        // two hit zones: legs/hips stay put, the upper body shifts out when leaning
+        const lo = leanOffset(p, 0.8), split = p.h * 0.55;
+        for (const [cx, cz, y0, y1, r] of [[p.x, p.z, 0, split, PR + 0.04], [p.x + lo.x, p.z + lo.z, split, p.h + 0.05, PR * 0.85 + 0.04]]) {
+          const t = segCircle(p0.x, p0.z, p0.x + seg.x, p0.z + seg.z, cx, cz, r);
+          if (t >= 0 && t < tBest) {
+            const y = p0.y + seg.y * t;
+            if (y >= y0 && y <= y1) { tBest = t; kind = 'player'; hitP = p; point = p0.clone().addScaledVector(seg, t); }
+          }
         }
       }
     }
@@ -264,7 +274,7 @@ function updateHuman(p, dt) {
     p.mvx = p.mvz = 0; p.moving = sp > 0.5; p.sprint = false;
     if (p.diveT <= 0) { p.diveT = 0; p.diveCd = 0.5; }
   } else {
-    p.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !p.crouch;
+    p.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !p.crouch && Math.abs(p.lean) < 0.2;
     // forward is fastest, strafing a bit slower, backpedalling slowest
     const base = p.crouch ? 2.4 : p.sprint ? 7.2 : 4.8;
     const sp = f < 0 ? base * 0.75 : f === 0 ? base * 0.9 : base;
@@ -274,6 +284,17 @@ function updateHuman(p, dt) {
     move(p, p.mvx * dt, p.mvz * dt);
     p.moving = len > 0;
   }
+
+  // lean: Q left, E right. Stops short if a wall is in the way so the camera never clips in.
+  let want = p.diveT > 0 ? 0 : (keys.KeyE ? 1 : 0) - (keys.KeyQ ? 1 : 0);
+  if (want) {
+    const rx = -Math.sin(p.ang) * want * LEAN_DIST, rz = Math.cos(p.ang) * want * LEAN_DIST;
+    let f = 1;
+    while (f > 0 && segBlocked2D(p.x, p.z, p.x + rx * f, p.z + rz * f, 0.14)) f -= 0.1;
+    want *= Math.max(0, f);
+  }
+  p.lean += (want - p.lean) * Math.min(1, dt * 10);
+  if (Math.abs(p.lean) > 0.2) p.sprint = false;
 
   if (keys.KeyR) startReload(p);
   // semi-auto: each click queues one shot; it fires as soon as the trigger resets
@@ -349,7 +370,8 @@ function updateBot(b, dt) {
     let best = null, bd = 1e9;
     for (const f of foes) {
       const d = Math.hypot(f.x - b.x, f.z - b.z);
-      if (d < D.sight && d < bd && losClear(b.x, eyeY(b), b.z, f.x, chestY(f), f.z)) { best = f; bd = d; }
+      const lo = leanOffset(f, 0.8);
+      if (d < D.sight && d < bd && losClear(b.x, eyeY(b), b.z, f.x + lo.x, chestY(f), f.z + lo.z)) { best = f; bd = d; }
     }
     if (best !== b.tgt) b.seen = 0;
     b.tgt = best; b.td = bd;
@@ -361,7 +383,8 @@ function updateBot(b, dt) {
     const t = b.tgt, td = Math.hypot(t.x - b.x, t.z - b.z);
     b.seen += dt;
     const ft = td / b.ballSpeed;
-    const px = t.x + t.vx * ft * D.lead, pz = t.z + t.vz * ft * D.lead;
+    const tl = leanOffset(t, 0.8); // aim at whatever part of them is sticking out
+    const px = t.x + tl.x + t.vx * ft * D.lead, pz = t.z + tl.z + t.vz * ft * D.lead;
     const want = Math.atan2(pz - b.z, px - b.x);
     const da = angDiff(want, b.ang);
     b.ang += da * Math.min(1, dt * 9);
@@ -517,6 +540,7 @@ function syncModels(dt) {
     m.root.position.set(p.x, 0, p.z);
     m.root.rotation.y = -p.bodyAng;
     m.upper.rotation.y = -angDiff(p.ang, p.bodyAng);
+    m.upper.rotation.x = p.lean * 0.26; // tilt the upper body sideways when leaning
     m.body.scale.y = p.h / H_STAND;
     const speed = p.alive ? Math.hypot(p.vx, p.vz) : 0;
     if (speed > 0.4) p.phase += dt * speed * 2.2;
@@ -540,8 +564,9 @@ function updateCamera(dt) {
   }
   if (h.alive) {
     const bob = h.moving && state === 'playing' ? Math.sin(clock * (h.sprint ? 14 : 10)) * 0.035 : 0;
-    camera.position.set(h.x, eyeY(h) + bob, h.z);
-    const roll = h.diveT > 0 ? Math.sin((1 - h.diveT / DIVE_T) * Math.PI) * 0.09 * Math.sign(angDiff(h.diveDir, h.ang) || 1) : 0;
+    const lo = leanOffset(h);
+    camera.position.set(h.x + lo.x, eyeY(h) + bob, h.z + lo.z);
+    const roll = (h.diveT > 0 ? Math.sin((1 - h.diveT / DIVE_T) * Math.PI) * 0.09 * Math.sign(angDiff(h.diveDir, h.ang) || 1) : 0) - h.lean * 0.16;
     camera.rotation.set(h.pitch, -h.ang - Math.PI / 2, roll);
     vm.visible = true;
     vm.position.x += (VM_BASE.x + (h.moving ? Math.sin(clock * 5) * 0.012 : 0) - vm.position.x) * Math.min(1, dt * 10);
@@ -582,7 +607,8 @@ function renderHud() {
   $('ammoBox').classList.toggle('low', h.ammo <= Math.ceil(h.mag * 0.2));
   $('reloadBar').style.setProperty('--p', h.reload > 0 ? 1 - h.reload / h.reloadT : 0);
   $('reloadBar').classList.toggle('hidden', !(h.reload > 0));
-  $('stance').textContent = h.diveT > 0 ? 'DIVE' : h.crouch ? 'CROUCHED' : h.sprint ? 'SPRINT' : '';
+  const leanTxt = h.lean < -0.3 ? 'LEAN ◀' : h.lean > 0.3 ? 'LEAN ▶' : '';
+  $('stance').textContent = h.diveT > 0 ? 'DIVE' : [h.crouch ? 'CROUCHED' : h.sprint ? 'SPRINT' : '', leanTxt].filter(Boolean).join(' · ');
   $('legs').style.setProperty('--r', (angDiff(h.bodyAng, h.ang) * 180 / Math.PI).toFixed(1) + 'deg');
   $('legs').classList.toggle('hidden', !h.alive);
   const gap = 5 + currentSpread(h) * 500;
