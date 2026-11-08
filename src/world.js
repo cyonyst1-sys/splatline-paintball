@@ -1,6 +1,7 @@
 // Scene, field, inflatable bunkers, scenery, paint decals and 2D collision helpers.
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 export const FIELD = { hw: 25, hd: 15 };     // playing field half-size (metres)
 export const BOUND = { hw: 26.3, hd: 16.3 }; // where players can walk
@@ -231,7 +232,11 @@ export function createWorld(canvas, high) {
   scene.add(sky);
 
   // lights
-  scene.add(new THREE.HemisphereLight(0xdcecff, 0x4f6b3a, 1.15));
+  // soft reflections so metal and glossy nylon read properly
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  pmrem.dispose();
+  scene.add(new THREE.HemisphereLight(0xdcecff, 0x4f6b3a, 1.0));
   const sun = new THREE.DirectionalLight(0xfff0d8, 2.7);
   sun.position.set(-35, 50, 25);
   if (high) {
@@ -439,6 +444,11 @@ export function createWorld(canvas, high) {
   B.dorito(0, 11.3, Math.PI / 2);
   B.temple(0, -8.5, Math.PI / 2);
   scene.updateMatrixWorld(true);
+  // The room reflections are mainly for the marker; keep them subtle on the field itself.
+  scene.traverse((o) => {
+    const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    for (const m of ms) if ('envMapIntensity' in m) m.envMapIntensity = 0.12;
+  });
 
   // cover spots around every bunker
   const cover = [];

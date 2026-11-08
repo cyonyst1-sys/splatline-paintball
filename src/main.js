@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { createWorld, TEAMS, NETB, resolveCircle, segBlocked2D, segCircle } from './world.js';
 import { save, persist, resetSave, UPGRADES, stat, costOf, buy, addCoins } from './economy.js';
 import { sfx, initAudio, setListener, setVolume } from './audio.js';
+import { makeMarker, disposeMarker } from './marker.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -50,14 +52,6 @@ const M = {
   paint: TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.paint, roughness: 0.2, transparent: true, opacity: 0.9 })),
 };
 function mesh(geo, mat, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; }
-function makeGun(team) {
-  const g = new THREE.Group();
-  g.add(mesh(G.gunBody, M.gun, 0.1, 0, 0));
-  const barrel = mesh(G.barrel, M.gun, 0.42, 0.01, 0); barrel.rotation.z = Math.PI / 2; g.add(barrel);
-  const hop = mesh(G.hopper, M.paint[team], 0.06, 0.11, 0); hop.scale.set(1, 1.25, 1); g.add(hop);
-  const tank = mesh(G.tank, M.tank, -0.2, -0.04, 0); tank.rotation.z = Math.PI / 2; g.add(tank);
-  return g;
-}
 function makeModel(team) {
   const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
   const legs = [];
@@ -69,7 +63,7 @@ function makeModel(team) {
   body.add(mesh(G.head, M.skin, 0, 1.58, 0));
   body.add(mesh(G.mask, M.mask, 0.1, 1.56, 0));
   body.add(mesh(G.lens, M.lens, 0.165, 1.6, 0));
-  const gun = makeGun(team); gun.position.set(0.28, 1.2, 0.12); body.add(gun);
+  const gun = makeMarker(team, { detail: 'low' }); gun.position.set(0.24, 1.2, 0.13); body.add(gun);
   const armR = mesh(G.arm, M.jersey[team], 0.18, 1.22, 0.18); armR.rotation.z = -1.35; body.add(armR);
   const armL = mesh(G.arm, M.jersey[team], 0.28, 1.24, -0.06); armL.rotation.set(0.5, 0, -1.4); body.add(armL);
   const armUp = mesh(G.arm, M.jersey[team], 0, 1.82, -0.26); armUp.visible = false; body.add(armUp);
@@ -78,12 +72,20 @@ function makeModel(team) {
 }
 
 // first-person marker
-const vm = makeGun(0);
-vm.scale.setScalar(0.6); vm.rotation.y = Math.PI / 2 + 0.07; // gun's +x forward → camera's -z, angled in a touch
-vm.position.set(0.26, -0.24, -0.6);
-vm.traverse((m) => { if (m.isMesh) m.renderOrder = 2; });
+const vm = new THREE.Group();
+vm.rotation.y = Math.PI / 2 + 0.06; // marker's +x forward → camera's -z, angled in a touch
+vm.position.set(0.17, -0.19, -0.36);
+vm.scale.setScalar(0.85);
 camera.add(vm);
 const VM_BASE = vm.position.clone();
+let vmMuzzle = null;
+const upgradeLook = () => ({ barrel: save.up.barrel, hopper: save.up.hopper, tank: save.up.velocity });
+function buildViewmodel() {
+  for (const c of [...vm.children]) { vm.remove(c); disposeMarker(c); }
+  const m = makeMarker(0, upgradeLook());
+  vm.add(m); vmMuzzle = m.userData.muzzle;
+}
+buildViewmodel();
 
 // ---------- state ----------
 let players = [], balls = [], feed = [];
@@ -247,7 +249,7 @@ function humanFire(p) {
   let dist = hits.length ? hits[0].distance : 90;
   if (dir.y < 0) dist = Math.min(dist, -camera.position.y / dir.y);
   const aim = camera.position.clone().addScaledVector(dir, Math.max(dist, 2));
-  const muzzle = new THREE.Vector3(0.2, -0.17, -0.85).applyMatrix4(camera.matrixWorld);
+  const muzzle = vmMuzzle.getWorldPosition(new THREE.Vector3());
   const d = aim.sub(muzzle).normalize();
   const sp = currentSpread(p);
   d.x += gauss() * sp; d.y += gauss() * sp; d.z += gauss() * sp; d.normalize();
@@ -359,6 +361,7 @@ function startMatch() {
   earned = { tags: 0, rounds: 0, win: 0, play: 0 };
   for (const p of players) p.kills = 0;
   applyLoadout();
+  buildViewmodel();
   startRound();
   showScreen(null);
   $('hud').classList.remove('hidden');
@@ -547,7 +550,7 @@ function showScreen(id) {
   for (const s of SCREENS) $(s).classList.toggle('hidden', s !== id);
   document.body.classList.toggle('menu', !!id);
   if (id === 'home') renderHome();
-  if (id === 'shop') renderShop();
+  if (id === 'shop') { renderShop(); refreshPreview(); }
   updateCoins();
 }
 function renderHome() {
@@ -565,10 +568,48 @@ function renderShop() {
       <div class="pips">${pips}</div><div class="vals">${now}${next}</div>${btn}</div>`;
   }).join('');
 }
+// rotating 3D preview of the player's marker in the shop (its own small renderer)
+let preview = null;
+function refreshPreview() {
+  if (!preview) {
+    const c = $('markerPreview');
+    const r = new THREE.WebGLRenderer({ canvas: c, antialias: true, alpha: true });
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping;
+    const s = new THREE.Scene();
+    const pm = new THREE.PMREMGenerator(r);
+    s.environment = pm.fromScene(new RoomEnvironment(r), 0.04).texture; pm.dispose();
+    const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(1, 2, 2); s.add(key);
+    const rim = new THREE.DirectionalLight(0x9fc3ff, 1.4); rim.position.set(-2, 1, -2); s.add(rim);
+    const cam = new THREE.PerspectiveCamera(28, 2, 0.01, 10);
+    cam.position.set(0, 0.1, 1.05); cam.lookAt(0, 0, 0);
+    const pivot = new THREE.Group(); s.add(pivot);
+    preview = { r, s, cam, pivot, m: null, spin: 0.6, drag: null, yaw: 0.6 };
+    c.addEventListener('pointerdown', (e) => { preview.drag = e.clientX; c.setPointerCapture(e.pointerId); });
+    c.addEventListener('pointermove', (e) => { if (preview.drag != null) { preview.yaw += (e.clientX - preview.drag) * 0.01; preview.drag = e.clientX; } });
+    c.addEventListener('pointerup', () => { preview.drag = null; });
+  }
+  if (preview.m) { preview.pivot.remove(preview.m); disposeMarker(preview.m); }
+  preview.m = makeMarker(0, upgradeLook());
+  preview.m.position.set(-0.07, -0.03, 0); // centre the marker on the pivot
+  preview.pivot.add(preview.m);
+}
+function renderPreview(dt) {
+  if (!preview || $('shop').classList.contains('hidden')) return;
+  const c = preview.r.domElement, w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  if (c.width !== Math.round(w * preview.r.getPixelRatio()) || c.height !== Math.round(h * preview.r.getPixelRatio())) {
+    preview.r.setSize(w, h, false); preview.cam.aspect = w / h; preview.cam.updateProjectionMatrix();
+  }
+  if (preview.drag == null) preview.yaw += dt * 0.5;
+  preview.pivot.rotation.y = preview.yaw;
+  preview.r.render(preview.s, preview.cam);
+}
+
 $('shopGrid').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-k]'); if (!b) return;
   initAudio();
-  if (buy(b.dataset.k)) { sfx.buy(); renderShop(); updateCoins(); }
+  if (buy(b.dataset.k)) { sfx.buy(); renderShop(); updateCoins(); refreshPreview(); }
   else { sfx.deny(); b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); }
 });
 $('diff').addEventListener('click', (e) => {
@@ -670,6 +711,7 @@ function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
   update(dt); renderHud();
   renderer.render(scene, camera);
+  renderPreview(dt);
 }
 renderer.setAnimationLoop(frame);
 $('loading').classList.add('hidden');
@@ -677,9 +719,10 @@ $('loading').classList.add('hidden');
 // test hook: only with ?debug in the URL
 if (location.search.includes('debug')) {
   window.__splat = {
-    step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { last += dt * 1000; update(dt); } renderHud(); renderer.render(scene, camera); },
+    step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { last += dt * 1000; update(dt); } renderHud(); renderer.render(scene, camera); renderPreview(dt); },
     start() { fallbackLook = true; startMatch(); },
     get info() { return { state, score, round, alive: players.filter((p) => p.alive).map((p) => p.name), balls: balls.length, coins: save.coins }; },
     players: () => players,
+    previewYaw(y) { if (preview) preview.yaw = y; },
   };
 }

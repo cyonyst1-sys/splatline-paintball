@@ -53,6 +53,11 @@
   #shop .panel { max-width:980px; }
   .shop-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
   .shop-head h2 { margin:0; }
+  .preview-wrap { position:relative; height:clamp(150px, 26vh, 240px); margin-bottom:14px; border-radius:14px; overflow:hidden;
+    background:radial-gradient(ellipse at 50% 60%, #2b3440 0%, #12161b 75%); border:1px solid var(--line); }
+  #markerPreview { width:100%; height:100%; cursor:grab; touch-action:none; }
+  #markerPreview:active { cursor:grabbing; }
+  .preview-wrap span { position:absolute; left:14px; bottom:10px; font-size:12px; letter-spacing:.12em; color:var(--muted); font-weight:700; text-transform:uppercase; pointer-events:none; }
   #shopGrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:12px; }
   .card { background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:6px; }
   .card .ico { font-size:28px; }
@@ -183,6 +188,7 @@
         <button class="btn" id="shopBack" style="width:auto">Back</button>
       </div>
     </div>
+    <div class="preview-wrap"><canvas id="markerPreview"></canvas><span>Your marker · drag to spin</span></div>
     <div id="shopGrid"></div>
     <p style="color:var(--muted);font-size:13px;margin:14px 0 0">Earn coins by tagging opponents (+25), winning rounds (+40), finishing a match (+30) and winning it (+150). Difficulty multiplies every reward.</p>
   </div>
