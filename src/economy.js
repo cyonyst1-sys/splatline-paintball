@@ -5,7 +5,7 @@ const defaults = () => ({
   coins: 0,
   up: { rate: 0, hopper: 0, reload: 0, barrel: 0, velocity: 0 },
   stats: { matches: 0, wins: 0, tags: 0 },
-  settings: { sens: 1, quality: 'high', volume: 0.8, diff: 'normal' },
+  settings: { sens: 1, quality: 'high', volume: 0.8, diff: 'normal', crouchToggle: false },
 });
 
 function load() {
@@ -32,10 +32,10 @@ export function resetSave() {
 
 export const UPGRADES = {
   rate: {
-    name: 'Trigger Job', icon: '⚡', desc: 'Shoot faster',
+    name: 'Trigger Job', icon: '⚡', desc: 'Faster trigger reset: raises your max fire rate',
     max: 5, cost: [120, 240, 420, 650, 950],
-    value: (l) => +(0.16 - l * 0.018).toFixed(3), // seconds between shots
-    fmt: (v) => (1 / v).toFixed(1) + ' balls/s',
+    value: (l) => +(0.16 - l * 0.018).toFixed(3), // minimum seconds between shots
+    fmt: (v) => 'max ' + (1 / v).toFixed(1) + ' balls/s',
   },
   hopper: {
     name: 'Big Hopper', icon: '🛢️', desc: 'More paintballs per load',

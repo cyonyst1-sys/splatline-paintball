@@ -10,11 +10,14 @@ You play on Blue with three bot teammates against four Red bots on an outdoor fi
 
 | Control | Action |
 | --- | --- |
-| WASD / arrows | Move |
-| Mouse | Look and aim (click the game to lock the mouse) |
-| Left click (hold) | Shoot |
+| WASD / arrows | Move your legs (forward, back, strafe) |
+| Mouse | Look and aim, independently of your legs (click the game to lock the mouse) |
+| Left or right click | Fire one paintball (semi-auto); alternate buttons to shoot faster |
+| Space | Dive and slide low |
 | Shift | Sprint (less accurate) |
-| C (hold) | Crouch: hide behind low bunkers, steadier aim |
+| C | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings) |
+
+**Free look:** once you're moving, your legs keep their heading while you look and shoot anywhere. Stop and your body turns to face your view; look more than ~100° away and your body turns with you. The LEGS arrow on the HUD shows where your legs point.
 | R | Reload |
 | Esc / P | Pause |
 
@@ -26,7 +29,7 @@ Spend them on the **Upgrade marker** screen:
 
 | Upgrade | Effect | Levels |
 | --- | --- | --- |
-| Trigger Job | Fire rate 6.3 → 14.3 balls/s | 5 |
+| Trigger Job | Max fire rate 6.3 → 14.3 balls/s | 5 |
 | Big Hopper | 20 → 50 balls per load | 5 |
 | Speed Feed | Reload 1.6 s → 0.7 s | 5 |
 | Precision Barrel | Spread down to 35% | 5 |

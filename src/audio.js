@@ -20,7 +20,7 @@ function att(pos) {
   return Math.max(0.05, 1 - d / 55);
 }
 function noise(dur, freq, v, q = 1) {
-  if (!ac || v < 0.004) return;
+  if (!ac || !(v >= 0.004)) return; // also skips NaN
   const n = Math.max(1, (ac.sampleRate * dur) | 0), buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
   for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 2;
   const s = ac.createBufferSource(); s.buffer = buf;
@@ -48,5 +48,6 @@ export const sfx = {
   beep: () => tone(660, 660, 0.1, 0.1, 'square'),
   go: () => tone(440, 880, 0.3, 0.16, 'sawtooth'),
   reload: () => { noise(0.08, 2400, 0.15, 4); noise(0.12, 700, 0.12, 3); },
+  dive: () => { noise(0.22, 700, 0.18, 0.7); setTimeout(() => noise(0.16, 140, 0.45, 1), 330); },
   out: () => tone(320, 110, 0.5, 0.18, 'sawtooth'),
 };

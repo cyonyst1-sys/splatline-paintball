@@ -59,16 +59,18 @@ function makeModel(team) {
     const pivot = new THREE.Group(); pivot.position.set(0, 0.82, s * 0.12);
     pivot.add(mesh(G.leg, M.pants, 0, -0.4, 0)); body.add(pivot); legs.push(pivot);
   }
-  const torso = mesh(G.torso, M.jersey[team], 0, 1.15, 0); torso.scale.z = 1.12; body.add(torso);
-  body.add(mesh(G.head, M.skin, 0, 1.58, 0));
-  body.add(mesh(G.mask, M.mask, 0.1, 1.56, 0));
-  body.add(mesh(G.lens, M.lens, 0.165, 1.6, 0));
-  const gun = makeMarker(team, { detail: 'low' }); gun.position.set(0.24, 1.2, 0.13); body.add(gun);
-  const armR = mesh(G.arm, M.jersey[team], 0.18, 1.22, 0.18); armR.rotation.z = -1.35; body.add(armR);
-  const armL = mesh(G.arm, M.jersey[team], 0.28, 1.24, -0.06); armL.rotation.set(0.5, 0, -1.4); body.add(armL);
-  const armUp = mesh(G.arm, M.jersey[team], 0, 1.82, -0.26); armUp.visible = false; body.add(armUp);
+  // upper body turns with where the player looks; legs follow the body heading
+  const upper = new THREE.Group(); body.add(upper);
+  const torso = mesh(G.torso, M.jersey[team], 0, 1.15, 0); torso.scale.z = 1.12; upper.add(torso);
+  upper.add(mesh(G.head, M.skin, 0, 1.58, 0));
+  upper.add(mesh(G.mask, M.mask, 0.1, 1.56, 0));
+  upper.add(mesh(G.lens, M.lens, 0.165, 1.6, 0));
+  const gun = makeMarker(team, { detail: 'low' }); gun.position.set(0.24, 1.2, 0.13); upper.add(gun);
+  const armR = mesh(G.arm, M.jersey[team], 0.18, 1.22, 0.18); armR.rotation.z = -1.35; upper.add(armR);
+  const armL = mesh(G.arm, M.jersey[team], 0.28, 1.24, -0.06); armL.rotation.set(0.5, 0, -1.4); upper.add(armL);
+  const armUp = mesh(G.arm, M.jersey[team], 0, 1.82, -0.26); armUp.visible = false; upper.add(armUp);
   root.traverse((m) => { if (m.isMesh) m.castShadow = high; });
-  return { root, body, legs, torso, arms: [armR, armL, armUp], armUp, gun };
+  return { root, body, upper, legs, torso, arms: [armR, armL, armUp], armUp, gun };
 }
 
 // first-person marker
@@ -102,7 +104,8 @@ function makePlayers() {
     const model = makeModel(team); scene.add(model.root);
     players.push({
       team, i, human: team === 0 && i === 1, name: TEAMS[team].names[i], model,
-      x: 0, z: 0, ang: 0, pitch: 0, h: H_STAND, crouch: false, alive: true,
+      x: 0, z: 0, ang: 0, bodyAng: 0, pitch: 0, h: H_STAND, crouch: false, alive: true,
+      diveT: 0, diveCd: 0, diveDir: 0, queued: 0, crouchOn: false, cWas: false, spaceWas: false,
       ammo: 20, mag: 20, reload: 0, reloadT: 1.6, cd: 0, cool: 0.3, spread: 1, ballSpeed: 46, kills: 0,
       vx: 0, vz: 0, mvx: 0, mvz: 0, phase: 0, moving: false, sprint: false,
       goal: null, goalT: 0, seen: 0, tgt: null, td: 0, scanT: 0, strafe: 1, strafeT: 0, stuckT: 0, lx: 0, lz: 0, avoid: 1, hold: false,
@@ -115,7 +118,8 @@ function resetPlayers() {
   balls = [];
   for (const p of players) {
     p.x = p.team ? 22.5 : -22.5; p.z = -4.5 + p.i * 3;
-    p.ang = p.team ? Math.PI : 0; p.pitch = 0;
+    p.ang = p.bodyAng = p.team ? Math.PI : 0; p.pitch = 0;
+    p.diveT = 0; p.diveCd = 0; p.queued = 0; p.crouchOn = false;
     p.alive = true; p.crouch = false; p.h = H_STAND; p.ammo = p.mag; p.reload = 0; p.cd = 0;
     p.vx = p.vz = p.mvx = p.mvz = 0;
     p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z;
@@ -176,7 +180,7 @@ function updateBalls(dt) {
       normal = hits[0].face ? hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld) : v3.clone().negate();
     }
     if (p0.y + seg.y <= 0) {
-      const t = p0.y / (p0.y - (p0.y + seg.y));
+      const t = p0.y <= 0 ? 0 : p0.y / -seg.y; // ball already at/under the turf splats right away
       if (t < tBest) { tBest = t; kind = 'ground'; point = p0.clone().addScaledVector(seg, t); point.y = 0; normal = UP; }
     }
     if (state === 'playing') {
@@ -218,26 +222,71 @@ function eliminate(p, by, point) {
 const reward = (n) => Math.round(n * DIFF[save.settings.diff].reward);
 
 // ---------- human ----------
+const NECK = 1.75;                 // how far (rad, ~100°) you can look away from where your legs face
+const DIVE_T = 0.95, H_PRONE = 0.55;
+function clampNeck(p) {
+  const d = angDiff(p.ang, p.bodyAng);
+  if (Math.abs(d) > NECK) p.bodyAng = p.ang - Math.sign(d) * NECK;
+}
 function updateHuman(p, dt) {
   const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
   const s = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-  p.crouch = !!keys.KeyC;
-  p.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !p.crouch;
-  const sp = p.crouch ? 2.4 : p.sprint ? 7.2 : 4.8;
-  let mx = Math.cos(p.ang) * f - Math.sin(p.ang) * s, mz = Math.sin(p.ang) * f + Math.cos(p.ang) * s;
+  const wantsMove = f !== 0 || s !== 0;
+
+  // Legs keep their heading while you move; standing still, the body turns to face your view.
+  if (!wantsMove && p.diveT <= 0) p.bodyAng += angDiff(p.ang, p.bodyAng) * Math.min(1, dt * 6);
+  clampNeck(p);
+
+  // crouch (hold or toggle)
+  const cKey = !!keys.KeyC;
+  if (save.settings.crouchToggle) { if (cKey && !p.cWas) p.crouchOn = !p.crouchOn; p.crouch = p.crouchOn; }
+  else p.crouch = cKey;
+  p.cWas = cKey;
+
+  // movement direction in the world, relative to where the legs face
+  const ca = Math.cos(p.bodyAng), sa = Math.sin(p.bodyAng);
+  let mx = ca * f - sa * s, mz = sa * f + ca * s;
   const len = Math.hypot(mx, mz);
-  if (len > 0) { mx = mx / len * sp; mz = mz / len * sp; }
-  const k = Math.min(1, dt * 12);
-  p.mvx += (mx - p.mvx) * k; p.mvz += (mz - p.mvz) * k;
-  move(p, p.mvx * dt, p.mvz * dt);
-  p.moving = len > 0;
+
+  // dive
+  p.diveCd -= dt;
+  if (keys.Space && !p.spaceWas && p.diveT <= 0 && p.diveCd <= 0) {
+    p.diveDir = len > 0 ? Math.atan2(mz, mx) : p.ang;
+    p.diveT = DIVE_T; p.crouchOn = false; sfx.dive();
+  }
+  p.spaceWas = !!keys.Space;
+
+  if (p.diveT > 0) {
+    const t = DIVE_T - p.diveT;
+    p.diveT -= dt;
+    const sp = t < 0.35 ? 8.6 - t * 12 : Math.max(0, 4.4 - (t - 0.35) * 11); // lunge, then slide to a stop
+    move(p, Math.cos(p.diveDir) * sp * dt, Math.sin(p.diveDir) * sp * dt);
+    p.mvx = p.mvz = 0; p.moving = sp > 0.5; p.sprint = false;
+    if (p.diveT <= 0) { p.diveT = 0; p.diveCd = 0.5; }
+  } else {
+    p.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !p.crouch;
+    // forward is fastest, strafing a bit slower, backpedalling slowest
+    const base = p.crouch ? 2.4 : p.sprint ? 7.2 : 4.8;
+    const sp = f < 0 ? base * 0.75 : f === 0 ? base * 0.9 : base;
+    if (len > 0) { mx = mx / len * sp; mz = mz / len * sp; }
+    const k = Math.min(1, dt * 12);
+    p.mvx += (mx - p.mvx) * k; p.mvz += (mz - p.mvz) * k;
+    move(p, p.mvx * dt, p.mvz * dt);
+    p.moving = len > 0;
+  }
+
   if (keys.KeyR) startReload(p);
-  if (mouse.down && p.cd <= 0 && p.reload <= 0 && p.ammo > 0) humanFire(p);
+  // semi-auto: each click queues one shot; it fires as soon as the trigger resets
+  if (p.queued > 0) {
+    p.queued -= dt;
+    if (p.cd <= 0 && p.reload <= 0 && p.ammo > 0) { humanFire(p); p.queued = 0; }
+  }
 }
 function currentSpread(p) {
   let s = 0.012;
   if (p.moving) s += 0.015;
   if (p.sprint) s += 0.04;
+  if (p.diveT > 0) s += 0.03;
   if (p.crouch && !p.moving) s *= 0.6;
   return s * p.spread;
 }
@@ -433,6 +482,17 @@ function update(dt) {
       if (p.reload > 0) { p.reload -= dt; if (p.reload <= 0) { p.reload = 0; p.ammo = p.mag; } }
       if (p.human) updateHuman(p, dt); else updateBot(p, dt);
       p.vx = (p.x - px) / dt; p.vz = (p.z - pz) / dt;
+      if (!p.human) {
+        // bots' legs face the way they run (or backpedal); upper body keeps aiming
+        const spd = Math.hypot(p.vx, p.vz);
+        let target = p.ang;
+        if (spd > 0.5) {
+          const md = Math.atan2(p.vz, p.vx);
+          target = Math.abs(angDiff(md, p.ang)) <= Math.PI / 2 ? md : md + Math.PI;
+        }
+        p.bodyAng += angDiff(target, p.bodyAng) * Math.min(1, dt * 8);
+        clampNeck(p);
+      }
     }
     const alive = players.filter((p) => p.alive);
     for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) {
@@ -443,8 +503,8 @@ function update(dt) {
   if (state === 'playing' || state === 'roundEnd') updateBalls(dt);
   if (state === 'playing') endRoundCheck();
   for (const p of players) {
-    const target = p.crouch ? H_CROUCH : H_STAND;
-    p.h += (target - p.h) * Math.min(1, dt * 10);
+    const target = p.diveT > 0 ? H_PRONE : p.crouch ? H_CROUCH : H_STAND;
+    p.h += (target - p.h) * Math.min(1, dt * (p.diveT > 0 ? 16 : 10));
   }
   syncModels(dt);
   updateCamera(dt);
@@ -455,7 +515,8 @@ function syncModels(dt) {
     const m = p.model;
     m.root.visible = !(p.human && p.alive && inGameOrPaused());
     m.root.position.set(p.x, 0, p.z);
-    m.root.rotation.y = -p.ang;
+    m.root.rotation.y = -p.bodyAng;
+    m.upper.rotation.y = -angDiff(p.ang, p.bodyAng);
     m.body.scale.y = p.h / H_STAND;
     const speed = p.alive ? Math.hypot(p.vx, p.vz) : 0;
     if (speed > 0.4) p.phase += dt * speed * 2.2;
@@ -480,7 +541,8 @@ function updateCamera(dt) {
   if (h.alive) {
     const bob = h.moving && state === 'playing' ? Math.sin(clock * (h.sprint ? 14 : 10)) * 0.035 : 0;
     camera.position.set(h.x, eyeY(h) + bob, h.z);
-    camera.rotation.set(h.pitch, -h.ang - Math.PI / 2, 0);
+    const roll = h.diveT > 0 ? Math.sin((1 - h.diveT / DIVE_T) * Math.PI) * 0.09 * Math.sign(angDiff(h.diveDir, h.ang) || 1) : 0;
+    camera.rotation.set(h.pitch, -h.ang - Math.PI / 2, roll);
     vm.visible = true;
     vm.position.x += (VM_BASE.x + (h.moving ? Math.sin(clock * 5) * 0.012 : 0) - vm.position.x) * Math.min(1, dt * 10);
     vm.position.y += (VM_BASE.y + bob * 0.4 - (h.reload > 0 ? 0.12 : 0) - vm.position.y) * Math.min(1, dt * 10);
@@ -520,7 +582,9 @@ function renderHud() {
   $('ammoBox').classList.toggle('low', h.ammo <= Math.ceil(h.mag * 0.2));
   $('reloadBar').style.setProperty('--p', h.reload > 0 ? 1 - h.reload / h.reloadT : 0);
   $('reloadBar').classList.toggle('hidden', !(h.reload > 0));
-  $('stance').textContent = h.crouch ? 'CROUCHED' : h.sprint ? 'SPRINT' : '';
+  $('stance').textContent = h.diveT > 0 ? 'DIVE' : h.crouch ? 'CROUCHED' : h.sprint ? 'SPRINT' : '';
+  $('legs').style.setProperty('--r', (angDiff(h.bodyAng, h.ang) * 180 / Math.PI).toFixed(1) + 'deg');
+  $('legs').classList.toggle('hidden', !h.alive);
   const gap = 5 + currentSpread(h) * 500;
   $('cross').style.setProperty('--g', gap.toFixed(1) + 'px');
   $('cross').classList.toggle('hidden', !h.alive);
@@ -635,6 +699,13 @@ const sens = $('sens'), volume = $('volume');
 sens.value = save.settings.sens; volume.value = save.settings.volume;
 sens.addEventListener('input', () => { save.settings.sens = +sens.value; persist(); });
 volume.addEventListener('input', () => { save.settings.volume = +volume.value; setVolume(+volume.value); persist(); });
+for (const b of document.querySelectorAll('#crouchMode button')) {
+  b.classList.toggle('on', (b.dataset.c === 'toggle') === !!save.settings.crouchToggle);
+  b.addEventListener('click', () => {
+    save.settings.crouchToggle = b.dataset.c === 'toggle'; persist(); sfx.click();
+    for (const x of document.querySelectorAll('#crouchMode button')) x.classList.toggle('on', x === b);
+  });
+}
 for (const b of document.querySelectorAll('#quality button')) {
   b.classList.toggle('on', b.dataset.q === save.settings.quality);
   b.addEventListener('click', () => { if (b.dataset.q === save.settings.quality) return; save.settings.quality = b.dataset.q; persist(); location.reload(); });
@@ -681,9 +752,12 @@ canvas.addEventListener('mousedown', (e) => {
   if (!inGame()) return;
   if (!locked && !fallbackLook) { lock(); return; }
   const h = human();
-  if (e.button === 0) { if (h.alive) mouse.down = true; else specIdx++; }
+  if (e.button === 0 || e.button === 2) {
+    e.preventDefault();
+    if (!h.alive) specIdx++;
+    else if (state === 'playing') h.queued = h.cool + 0.08; // one shot per click, either button; waits for trigger reset
+  }
 });
-addEventListener('mouseup', (e) => { if (e.button === 0) mouse.down = false; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('keydown', (e) => {
   if (inGame() && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
