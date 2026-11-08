@@ -46,6 +46,8 @@ A mirrored 50 × 30 m field with inflatable bunkers: snakes, doritos, cans, bric
 - `src/economy.js`: coins, upgrades, saved progress
 - `src/audio.js`: procedural sound effects
 
+Every push to `main` redeploys the site on GitHub Pages within about a minute.
+
 To run locally, serve the folder with any static web server (ES modules don't load from `file://`).
 
 Graphics can be set to **Low** in Settings (no shadows, lower resolution) for slower computers. Keyboard and mouse only.
