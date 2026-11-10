@@ -4,6 +4,7 @@ import { createWorld, TEAMS, NETB, resolveCircle, segBlocked2D, segCircle } from
 import { save, persist, resetSave, UPGRADES, stat, costOf, buy, addCoins } from './economy.js';
 import { sfx, initAudio, setListener, setVolume } from './audio.js';
 import { makeMarker, disposeMarker } from './marker.js';
+import { MAPS, mapById } from './maps.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   net, onNet, available as netAvailable, host as netHost, join as netJoin, send as netSend,
@@ -100,7 +101,16 @@ let state = 'home', prevState = 'playing', timer = 0, round = 1, score = [0, 0],
 // multiplayer: matchDiff is the host's difficulty; localPaused opens the menu without stopping a shared match
 let matchDiff = save.settings.diff, myTeam = 0, localPaused = false, snapT = 0, poseT = 0;
 let roundTime = 0; const HUNT_AFTER = 40; // seconds into a round before bots go looking for hiding players
-let lobby = { code: '', mode: 'teams', players: [] };
+let lobby = { code: '', mode: 'teams', map: 'center', players: [] };
+
+// ---------- maps ----------
+let currentMap = null;
+const MAP_OPTIONS = ['random', ...MAPS.map((m) => m.id)];
+const validMap = (id) => MAPS.some((m) => m.id === id);
+const resolveMap = (sel) => (validMap(sel) ? sel : MAPS[(Math.random() * MAPS.length) | 0].id);
+function ensureMap(id) { if (currentMap !== id) { world.loadMap(id); currentMap = id; } }
+function mapInfo(sel) { return validMap(sel) ? mapById(sel) : { name: '🎲 Random map', desc: 'A different field every match.' }; }
+const cycleMap = (sel, d) => MAP_OPTIONS[(MAP_OPTIONS.indexOf(sel) + d + MAP_OPTIONS.length) % MAP_OPTIONS.length];
 let earned = null, specIdx = 0, locked = false, fallbackLook = false, hitMarker = 0, clock = 0, shopBack = 'home';
 const keys = {}, mouse = { down: false };
 const ray = new THREE.Raycaster();
@@ -506,6 +516,7 @@ function beginMatch(diff) {
   setTimeout(() => $('hint').classList.add('hidden'), 9000);
 }
 function startMatch() { // single player
+  ensureMap(resolveMap(save.settings.map));
   assignSlots([{ slot: 1, id: 'local', name: 'You' }]);
   beginMatch(save.settings.diff); sfx.click(); lock();
 }
@@ -576,12 +587,13 @@ function lobbyAssign() {
   });
 }
 function broadcastLobby() {
-  broadcast({ t: 'lobby', code: lobby.code, mode: lobby.mode, players: lobby.players });
+  broadcast({ t: 'lobby', code: lobby.code, mode: lobby.mode, map: lobby.map, players: lobby.players });
   renderLobby();
 }
 function hostStartMatch() {
-  const assign = lobbyAssign();
-  broadcast({ t: 'start', assign, diff: save.settings.diff });
+  const assign = lobbyAssign(), map = resolveMap(lobby.map);
+  ensureMap(map);
+  broadcast({ t: 'start', assign, diff: save.settings.diff, map });
   assignSlots(assign);
   beginMatch(save.settings.diff); lock();
 }
@@ -644,8 +656,9 @@ function clientMessage(m) {
   switch (m.t) {
     case 'lobby': {
       if (!Array.isArray(m.players)) return;
-      lobby = { code: cleanCode(m.code), mode: m.mode === 'coop' ? 'coop' : 'teams',
+      lobby = { code: cleanCode(m.code), mode: m.mode === 'coop' ? 'coop' : 'teams', map: validMap(m.map) ? m.map : 'random',
         players: m.players.slice(0, 8).map((l) => ({ id: String(l.id), name: cleanName(l.name) })) };
+      if (validMap(lobby.map) && !inGame()) ensureMap(lobby.map); // preview the host's pick behind the lobby
       renderLobby();
       if (!inGame() && state !== 'results') { state = 'lobby'; showScreen('lobby'); }
       return;
@@ -656,6 +669,7 @@ function clientMessage(m) {
     case 'start': {
       if (!Array.isArray(m.assign)) return;
       const assign = m.assign.filter((a) => a && okSlot(a.slot)).map((a) => ({ slot: a.slot, id: String(a.id), name: cleanName(a.name) }));
+      if (validMap(m.map)) ensureMap(m.map);
       assignSlots(assign);
       if (!human()) return;
       beginMatch(m.diff);
@@ -933,10 +947,18 @@ function renderLobby() {
   }
   $('btnStart').classList.toggle('hidden', !isHost);
   $('lobbyWait').classList.toggle('hidden', isHost);
+  const mi = mapInfo(lobby.map);
+  $('lobbyMapName').textContent = mi.name; $('lobbyMapDesc').textContent = mi.desc;
+  for (const b of document.querySelectorAll('#lobbyMapPick .arrow')) b.classList.toggle('hidden', !isHost);
+}
+function renderMapPick() {
+  const mi = mapInfo(save.settings.map);
+  $('mapName').textContent = mi.name; $('mapDesc').textContent = mi.desc;
 }
 function renderHome() {
   $('stats').textContent = `${save.stats.matches} matches · ${save.stats.wins} wins · ${save.stats.tags} tags`;
   for (const b of document.querySelectorAll('#diff button')) b.classList.toggle('on', b.dataset.d === save.settings.diff);
+  renderMapPick();
 }
 function renderShop() {
   $('shopGrid').innerHTML = Object.entries(UPGRADES).map(([k, u]) => {
@@ -1034,7 +1056,7 @@ nav('btnHost', async () => {
   mpBusy(true, 'Creating room…');
   try {
     const code = await netHost();
-    lobby = { code, mode: hostMode, players: [{ id: 'host', name: myName() }] };
+    lobby = { code, mode: hostMode, map: save.settings.map, players: [{ id: 'host', name: myName() }] };
     state = 'lobby'; mpBusy(false); showScreen('lobby');
   } catch (e) { mpBusy(false, e.message || "Couldn't create a room."); }
 });
@@ -1056,6 +1078,24 @@ for (const b of document.querySelectorAll('#lobbyMode button')) {
   });
 }
 nav('btnStart', hostStartMatch);
+// map pickers: home (single player + default for hosting) and the lobby (host only)
+for (const b of document.querySelectorAll('#mapPick .arrow')) {
+  b.addEventListener('click', () => {
+    initAudio(); sfx.click();
+    save.settings.map = cycleMap(save.settings.map, +b.dataset.d); persist();
+    if (validMap(save.settings.map)) ensureMap(save.settings.map);
+    renderMapPick();
+  });
+}
+for (const b of document.querySelectorAll('#lobbyMapPick .arrow')) {
+  b.addEventListener('click', () => {
+    if (net.mode !== 'host') return;
+    initAudio(); sfx.click();
+    lobby.map = cycleMap(lobby.map, +b.dataset.d);
+    if (validMap(lobby.map)) ensureMap(lobby.map);
+    broadcastLobby();
+  });
+}
 nav('btnLeave', () => quitToHome());
 nav('btnCopy', async () => {
   const link = `${location.origin}${location.pathname}?room=${lobby.code}`;
@@ -1150,6 +1190,7 @@ function resize() {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize); resize();
+ensureMap(resolveMap(save.settings.map));
 makePlayers(); assignSlots([{ slot: 1, id: 'local', name: 'You' }]); resetPlayers(); buildViewmodel();
 showScreen('home');
 { // invite links: ?room=CODE opens the join screen with the code filled in
@@ -1178,6 +1219,9 @@ if (location.search.includes('debug')) {
     players: () => players,
     net: () => net,
     lobby: () => lobby,
+    loadMap: (id) => { ensureMap(id); resetPlayers(); },
+    maps: () => MAPS.map((m) => m.id),
+    world: () => world,
     previewYaw(y) { if (preview) preview.yaw = y; },
   };
 }

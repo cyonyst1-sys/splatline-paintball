@@ -1,7 +1,7 @@
-// Scene, field, inflatable bunkers, scenery, paint decals and 2D collision helpers.
+// Scene, scenery, map loading (bunkers + theme), paint decals and 2D collision helpers.
 import * as THREE from 'three';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { KINDS, buildBunker, mapById } from './maps.js';
 
 export const FIELD = { hw: 25, hd: 15 };     // playing field half-size (metres)
 export const BOUND = { hw: 26.3, hd: 16.3 }; // where players can walk
@@ -94,18 +94,31 @@ function canvasTex(w, h, draw, srgb = true) {
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-function fieldTexture() {
+// ground noise per surface type: [count, colours, w, h]
+const GROUND = {
+  grass: [60000, ['rgba(18,48,18,.28)', 'rgba(170,220,130,.13)'], 2, 3],
+  forest: [70000, ['rgba(40,30,15,.3)', 'rgba(150,190,100,.14)', 'rgba(90,70,40,.2)'], 2, 3],
+  dirt: [60000, ['rgba(50,32,18,.3)', 'rgba(170,135,95,.18)', 'rgba(100,80,55,.2)'], 2, 2],
+  asphalt: [80000, ['rgba(20,20,22,.35)', 'rgba(140,140,145,.18)'], 2, 2],
+  sand: [50000, ['rgba(160,120,70,.22)', 'rgba(255,240,205,.25)'], 2, 2],
+  snow: [30000, ['rgba(170,195,225,.25)', 'rgba(255,255,255,.6)'], 2, 2],
+  stubble: [70000, ['rgba(120,90,30,.3)', 'rgba(240,215,140,.25)'], 1.5, 5],
+  gravel: [90000, ['rgba(40,38,34,.35)', 'rgba(170,165,155,.3)', 'rgba(110,100,90,.3)'], 3, 3],
+};
+function fieldTexture(th) {
   return canvasTex(2048, 1229, (g, W, H) => {
     const sx = W / 50;
-    g.fillStyle = '#3d8a3a'; g.fillRect(0, 0, W, H);
-    for (let i = 0; i < 10; i++) { g.fillStyle = i % 2 ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.07)'; g.fillRect(i * 5 * sx, 0, 5 * sx, H); }
-    for (let i = 0; i < 60000; i++) {
-      g.fillStyle = Math.random() < 0.5 ? 'rgba(18,48,18,.28)' : 'rgba(170,220,130,.13)';
-      g.fillRect(Math.random() * W, Math.random() * H, 2, 3);
-    }
+    g.fillStyle = th.field; g.fillRect(0, 0, W, H);
+    if (th.ground === 'grass' || th.ground === 'forest') for (let i = 0; i < 10; i++) { g.fillStyle = i % 2 ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.07)'; g.fillRect(i * 5 * sx, 0, 5 * sx, H); }
+    if (th.ground === 'stubble') for (let y = 0; y < H; y += 14) { g.fillStyle = 'rgba(120,90,30,.18)'; g.fillRect(0, y, W, 4); }
+    if (th.ground === 'sand') for (let i = 0; i < 70; i++) { g.strokeStyle = 'rgba(170,130,80,.18)'; g.lineWidth = 3; const y = Math.random() * H; g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= W; x += 60) g.lineTo(x, y + Math.sin(x / 90 + i) * 14); g.stroke(); }
+    if (th.ground === 'asphalt') for (let i = 0; i < 40; i++) { g.strokeStyle = 'rgba(15,15,15,.45)'; g.lineWidth = 2; let x = Math.random() * W, y = Math.random() * H; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 8; k++) { x += rnd(-40, 40); y += rnd(-40, 40); g.lineTo(x, y); } g.stroke(); }
+    if (th.ground === 'forest' || th.ground === 'dirt') for (let i = 0; i < 40; i++) { const x = Math.random() * W, y = Math.random() * H, r = rnd(30, 120); const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, th.ground === 'forest' ? 'rgba(90,65,35,.35)' : 'rgba(60,40,20,.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+    const [n, cols, w, h] = GROUND[th.ground] || GROUND.grass;
+    for (let i = 0; i < n; i++) { g.fillStyle = cols[i % cols.length]; g.fillRect(Math.random() * W, Math.random() * H, w, h); }
     g.fillStyle = 'rgba(47,125,255,.25)'; g.fillRect(0, 0, 4 * sx, H);
     g.fillStyle = 'rgba(255,64,88,.25)'; g.fillRect(W - 4 * sx, 0, 4 * sx, H);
-    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, H - 10);
+    g.strokeStyle = th.line; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, H - 10);
     g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.stroke();
     g.beginPath(); g.arc(W / 2, H / 2, 3.2 * sx, 0, Math.PI * 2); g.stroke();
     g.lineWidth = 6; g.setLineDash([34, 26]);
@@ -113,32 +126,24 @@ function fieldTexture() {
     g.setLineDash([]);
   });
 }
-function grassTexture(base) {
+function noiseTexture(base, ground) {
   const t = canvasTex(256, 256, (g, W, H) => {
     g.fillStyle = base; g.fillRect(0, 0, W, H);
-    for (let i = 0; i < 5000; i++) {
-      g.fillStyle = Math.random() < 0.5 ? 'rgba(15,40,15,.3)' : 'rgba(180,220,140,.12)';
-      g.fillRect(Math.random() * W, Math.random() * H, 1.5, 3);
-    }
+    const [, cols, w, h] = GROUND[ground] || GROUND.grass;
+    for (let i = 0; i < 5000; i++) { g.fillStyle = cols[i % cols.length]; g.fillRect(Math.random() * W, Math.random() * H, w * 0.75, h); }
   });
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
 function netTexture() {
-  const t = canvasTex(64, 64, (g, W) => {
-    g.strokeStyle = 'rgba(20,20,20,.9)'; g.lineWidth = 3;
-    g.strokeRect(0, 0, W, W);
-  });
+  const t = canvasTex(64, 64, (g, W) => { g.strokeStyle = 'rgba(20,20,20,.9)'; g.lineWidth = 3; g.strokeRect(0, 0, W, W); });
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
 function bannerTexture(text, bg, fg) {
   return canvasTex(1024, 192, (g, W, H) => {
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
-    for (let i = 0; i < 14; i++) {
-      g.fillStyle = `rgba(255,255,255,${rnd(0.04, 0.12)})`;
-      g.beginPath(); g.arc(Math.random() * W, Math.random() * H, rnd(10, 45), 0, 7); g.fill();
-    }
+    for (let i = 0; i < 14; i++) { g.fillStyle = `rgba(255,255,255,${rnd(0.04, 0.12)})`; g.beginPath(); g.arc(Math.random() * W, Math.random() * H, rnd(10, 45), 0, 7); g.fill(); }
     g.fillStyle = fg; g.font = '900 120px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(text, W / 2, H / 2 + 6);
   });
@@ -151,56 +156,18 @@ function splatTexture() {
     blob(S / 2, S / 2, r);
     for (let i = 0; i < 7; i++) { const a = Math.random() * 6.28, d = r * rnd(0.4, 0.9); blob(S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d, r * rnd(0.3, 0.6)); }
     const dir = Math.random() * 6.28;
-    for (let i = 0; i < 14; i++) {
-      const a = dir + rnd(-0.9, 0.9), d = r * rnd(1.1, 2.4);
-      blob(S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d, r * rnd(0.06, 0.22));
-    }
+    for (let i = 0; i < 14; i++) { const a = dir + rnd(-0.9, 0.9), d = r * rnd(1.1, 2.4); blob(S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d, r * rnd(0.06, 0.22)); }
   });
 }
 
-// ---------- inflatable geometry ----------
-function roundedPoly(pts, r) {
-  const s = new THREE.Shape(), n = pts.length;
-  for (let i = 0; i < n; i++) {
-    const p = pts[i], a = pts[(i + n - 1) % n], c = pts[(i + 1) % n];
-    const v1 = a.clone().sub(p).normalize().multiplyScalar(r).add(p);
-    const v2 = c.clone().sub(p).normalize().multiplyScalar(r).add(p);
-    if (i === 0) s.moveTo(v1.x, v1.y); else s.lineTo(v1.x, v1.y);
-    s.quadraticCurveTo(p.x, p.y, v2.x, v2.y);
-  }
-  s.closePath();
-  return s;
-}
-function smooth(geo) {
-  geo.deleteAttribute('uv');
-  geo.deleteAttribute('normal');
-  geo = mergeVertices(geo, 1e-4);
-  geo.computeVertexNormals();
-  return geo;
-}
-// Extrude a 2D footprint upward with a fat bevel so it looks blown-up.
-function puffy(shape, h, b) {
-  const g = new THREE.ExtrudeGeometry(shape, {
-    depth: Math.max(0.01, h - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b,
-    bevelSegments: 6, curveSegments: 10, steps: 1,
-  });
-  g.rotateX(-Math.PI / 2);
-  g.translate(0, b, 0);
-  return smooth(g);
-}
-function rectPts(w, d) { return [new THREE.Vector2(-w / 2, -d / 2), new THREE.Vector2(w / 2, -d / 2), new THREE.Vector2(w / 2, d / 2), new THREE.Vector2(-w / 2, d / 2)]; }
-function boxGeo(w, d, h, b) { return puffy(roundedPoly(rectPts(w - 2 * b, d - 2 * b), Math.min(0.12, (Math.min(w, d) - 2 * b) / 2.2)), h, b); }
-function triGeo(R, h, b) {
-  const pts = [0, 1, 2].map((i) => { const a = i * Math.PI * 2 / 3; return new THREE.Vector2(Math.cos(a) * R, Math.sin(a) * R); });
-  return puffy(roundedPoly(pts, 0.18), h, b);
-}
-function canGeo(r, h, b) {
-  const pts = [new THREE.Vector2(0, 0)];
-  for (let i = 0; i <= 8; i++) { const a = -Math.PI / 2 + i / 8 * Math.PI / 2; pts.push(new THREE.Vector2(r - b + Math.cos(a) * b, b + Math.sin(a) * b)); }
-  for (let i = 0; i <= 8; i++) { const a = i / 8 * Math.PI / 2; pts.push(new THREE.Vector2(r - b + Math.cos(a) * b, h - b + Math.sin(a) * b)); }
-  pts.push(new THREE.Vector2(0, h));
-  return new THREE.LatheGeometry(pts, 40);
-}
+// tree crown colours per theme mode: [hue range, saturation range, lightness range] or null to hide
+const TREE_COLORS = {
+  green: [[0.26, 0.36], [0.35, 0.55], [0.18, 0.3]], dense: [[0.25, 0.34], [0.35, 0.6], [0.14, 0.26]],
+  sparse: [[0.26, 0.34], [0.3, 0.45], [0.2, 0.3]], autumn: [[0.03, 0.13], [0.6, 0.8], [0.32, 0.45]],
+  dry: [[0.14, 0.22], [0.25, 0.4], [0.28, 0.38]], dead: [[0.07, 0.1], [0.15, 0.25], [0.2, 0.28]],
+  snow: [[0.55, 0.6], [0.1, 0.2], [0.85, 0.93]], night: [[0.3, 0.4], [0.3, 0.45], [0.06, 0.1]], none: null,
+};
+const TREE_COUNT = { dense: 1, green: 0.75, autumn: 0.75, snow: 0.75, night: 0.75, dry: 0.5, dead: 0.5, sparse: 0.35, none: 0 };
 
 // ---------- world ----------
 export function createWorld(canvas, high) {
@@ -223,20 +190,20 @@ export function createWorld(canvas, high) {
   const shadowy = (o) => o.traverse((m) => { if (m.isMesh) { m.castShadow = high; m.receiveShadow = high; } });
 
   // sky dome
+  const skyU = { top: { value: new THREE.Color(0x2f73d0) }, bottom: { value: new THREE.Color(0xdcecf7) } };
   const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false,
-    uniforms: { top: { value: new THREE.Color(0x2f73d0) }, bottom: { value: new THREE.Color(0xdcecf7) } },
+    side: THREE.BackSide, depthWrite: false, uniforms: skyU,
     vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
     fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 vP; void main(){ float h = clamp(normalize(vP).y * 1.8, 0., 1.); gl_FragColor = vec4(mix(bottom, top, pow(h, .6)), 1.); \n#include <colorspace_fragment>\n }',
   }));
   scene.add(sky);
 
-  // lights
-  // soft reflections so metal and glossy nylon read properly
+  // lights (+ soft reflections so metal and glossy surfaces read properly)
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
   pmrem.dispose();
-  scene.add(new THREE.HemisphereLight(0xdcecff, 0x4f6b3a, 1.0));
+  const hemi = new THREE.HemisphereLight(0xdcecff, 0x4f6b3a, 1.0);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff0d8, 2.7);
   sun.position.set(-35, 50, 25);
   if (high) {
@@ -247,32 +214,24 @@ export function createWorld(canvas, high) {
   }
   scene.add(sun);
 
-  // ground: field, apron, countryside
-  const field = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.hw * 2, FIELD.hd * 2),
-    new THREE.MeshStandardMaterial({ map: fieldTexture(), roughness: 0.95 }));
+  // ground: field, apron, countryside (textures are swapped per map)
+  const fieldMat = new THREE.MeshStandardMaterial({ roughness: 0.95, emissive: 0x000000 });
+  const field = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.hw * 2, FIELD.hd * 2), fieldMat);
   field.rotation.x = -Math.PI / 2; field.receiveShadow = true; scene.add(field);
-  field.material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
-
-  const apronTex = grassTexture('#336f31'); apronTex.repeat.set(14, 9);
-  const apron = new THREE.Mesh(new THREE.PlaneGeometry(NETB.hw * 2 + 0.4, NETB.hd * 2 + 0.4), new THREE.MeshStandardMaterial({ map: apronTex, roughness: 1 }));
+  const apronMat = new THREE.MeshStandardMaterial({ roughness: 1 });
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(NETB.hw * 2 + 0.4, NETB.hd * 2 + 0.4), apronMat);
   apron.rotation.x = -Math.PI / 2; apron.position.y = -0.01; apron.receiveShadow = true; scene.add(apron);
-
-  const outTex = grassTexture('#4a7a37'); outTex.repeat.set(90, 90);
-  const outer = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ map: outTex, roughness: 1 }));
+  const outerMat = new THREE.MeshStandardMaterial({ roughness: 1 });
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), outerMat);
   outer.rotation.x = -Math.PI / 2; outer.position.y = -0.03; outer.receiveShadow = true; scene.add(outer);
-
-  // gravel path round the net
-  const path = new THREE.Mesh(new THREE.RingGeometry(1, 1.12, 4, 1), new THREE.MeshStandardMaterial({ color: 0x9a8f7a, roughness: 1 }));
+  const pathMat = new THREE.MeshStandardMaterial({ color: 0x9a8f7a, roughness: 1 });
+  const path = new THREE.Mesh(new THREE.RingGeometry(1, 1.12, 4, 1), pathMat);
   path.rotation.x = -Math.PI / 2; path.rotation.z = Math.PI / 4; path.scale.set(NETB.hw * 1.43, NETB.hd * 1.43, 1); path.position.y = -0.02; scene.add(path);
 
   // ---- netting, poles, kickboards, banners ----
   const netH = 6, nt = netTexture();
   const netMat = (len) => { const t = nt.clone(); t.needsUpdate = true; t.repeat.set(len / 0.5, netH / 0.5); return new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }); };
-  const nets = [
-    [NETB.hw * 2, 0, NETB.hd, 0], [NETB.hw * 2, 0, -NETB.hd, 0],
-    [NETB.hd * 2, NETB.hw, 0, Math.PI / 2], [NETB.hd * 2, -NETB.hw, 0, Math.PI / 2],
-  ];
-  for (const [len, x, z, ry] of nets) {
+  for (const [len, x, z, ry] of [[NETB.hw * 2, 0, NETB.hd, 0], [NETB.hw * 2, 0, -NETB.hd, 0], [NETB.hd * 2, NETB.hw, 0, Math.PI / 2], [NETB.hd * 2, -NETB.hw, 0, Math.PI / 2]]) {
     const n = new THREE.Mesh(new THREE.PlaneGeometry(len, netH), netMat(len));
     n.position.set(x, 0.5 + netH / 2, z); n.rotation.y = ry; scene.add(n);
   }
@@ -297,29 +256,26 @@ export function createWorld(canvas, high) {
   }
 
   // ---- scenery ----
-  // trees
-  const treeCount = high ? 140 : 70;
-  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.35, 3, 6), new THREE.MeshStandardMaterial({ color: 0x5a3d26, roughness: 1 }), treeCount);
-  const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(2.4, 7, 7), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true }), treeCount);
+  const treeMax = high ? 160 : 80;
+  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.35, 3, 6), new THREE.MeshStandardMaterial({ color: 0x5a3d26, roughness: 1 }), treeMax);
+  const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(2.4, 7, 7), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true }), treeMax);
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), col = new THREE.Color();
-  for (let i = 0; i < treeCount; i++) {
+  for (let i = 0; i < treeMax; i++) {
     const a = Math.random() * Math.PI * 2, k = rnd(1.05, 3.6), s = rnd(0.8, 1.6);
     const x = Math.cos(a) * (NETB.hw + 14) * k, z = Math.sin(a) * (NETB.hd + 14) * k;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6);
     mtx.compose(new THREE.Vector3(x, 1.5 * s, z), q, new THREE.Vector3(s, s, s)); trunks.setMatrixAt(i, mtx);
     mtx.compose(new THREE.Vector3(x, (3 + 3.2) * s, z), q, new THREE.Vector3(s, s * rnd(0.85, 1.2), s)); crowns.setMatrixAt(i, mtx);
-    crowns.setColorAt(i, col.setHSL(rnd(0.26, 0.36), rnd(0.35, 0.55), rnd(0.18, 0.3)));
+    crowns.setColorAt(i, col.set(0x2f6b2a));
   }
   trunks.castShadow = crowns.castShadow = high;
   scene.add(trunks, crowns);
-  // hills
   const hillMat = new THREE.MeshStandardMaterial({ color: 0x47703a, roughness: 1, flatShading: true });
   for (let i = 0; i < 9; i++) {
     const a = i / 9 * Math.PI * 2 + rnd(-0.2, 0.2), r = rnd(170, 230);
     const h = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), hillMat);
     h.position.set(Math.cos(a) * r, -8, Math.sin(a) * r); h.scale.set(rnd(50, 80), rnd(18, 32), rnd(50, 80)); scene.add(h);
   }
-  // bleachers + crowd
   const bleachMat = new THREE.MeshStandardMaterial({ color: 0xa7adb5, roughness: 0.4, metalness: 0.6 });
   for (let i = 0; i < 4; i++) {
     const s = new THREE.Mesh(new THREE.BoxGeometry(24, 0.45, 1), bleachMat);
@@ -337,7 +293,6 @@ export function createWorld(canvas, high) {
     crowd.setColorAt(i, col.setHSL(Math.random(), 0.65, 0.5));
   }
   scene.add(crowd, heads);
-  // team tents, tables, barrels
   const flags = [];
   for (const side of [-1, 1]) {
     const team = side < 0 ? 0 : 1, tc = TEAMS[team].color;
@@ -357,7 +312,6 @@ export function createWorld(canvas, high) {
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.9, 14), new THREE.MeshStandardMaterial({ color: i % 2 ? 0x2b5c8a : 0x9a3b2b, roughness: 0.6, metalness: 0.3 }));
       barrel.position.set(tx + side * rnd(2.8, 4), 0.45, tz + 4 + i * 0.75); shadowy(barrel); scene.add(barrel);
     }
-    // flag
     const fx = side * (NETB.hw + 3), fz = -13;
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 7, 8), poleMat); pole.position.set(fx, 3.5, fz); shadowy(pole); scene.add(pole);
     const fg = new THREE.PlaneGeometry(2, 1.2, 16, 6); fg.translate(1, 0, 0);
@@ -365,104 +319,97 @@ export function createWorld(canvas, high) {
     flag.position.set(fx, 6.3, fz); flag.castShadow = high; scene.add(flag);
     flags.push({ mesh: flag, base: fg.attributes.position.array.slice(), phase: side });
   }
+  // the scenery's reflections stay subtle; full reflections are kept for the marker
+  scene.traverse((o) => { if (o.material && 'envMapIntensity' in o.material) o.material.envMapIntensity = 0.12; });
 
-  // ---- inflatable bunkers ----
-  const matCache = {};
-  const nylon = (hex) => matCache[hex] || (matCache[hex] = high
-    ? new THREE.MeshPhysicalMaterial({ color: hex, roughness: 0.4, clearcoat: 0.45, clearcoatRoughness: 0.35 })
-    : new THREE.MeshStandardMaterial({ color: hex, roughness: 0.45 }));
-  function bunker(group, collide, x, z, rot, shape) {
-    group.position.set(x, 0, z); group.rotation.y = rot;
-    shadowy(group); scene.add(group);
-    bunkerMeshes.push(...collide);
-    shapes.push({ ...shape, x, z, rot });
-  }
-  function box(w, d, h, main, acc) {
-    return (x, z, rot) => {
-      const g = new THREE.Group(), b = Math.min(0.2, Math.min(w, d) * 0.22);
-      const body = new THREE.Mesh(boxGeo(w, d, h, b), nylon(main)); g.add(body);
-      const bands = h > 1.5 ? [0.32, 0.68] : [0.5];
-      for (const f of bands) { const band = new THREE.Mesh(boxGeo(w + 0.04, d + 0.04, 0.2, 0.07), nylon(acc)); band.position.y = h * f - 0.1; g.add(band); }
-      bunker(g, [body], x, z, rot, { t: 'b', hw: w / 2, hd: d / 2 });
-    };
-  }
-  function can(r, h, main, acc) {
-    return (x, z) => {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(canGeo(r, h, Math.min(0.2, r * 0.35)), nylon(main)); g.add(body);
-      const bands = h > 1.5 ? [0.33, 0.66] : [0.5];
-      for (const f of bands) { const t = new THREE.Mesh(new THREE.TorusGeometry(r + 0.005, 0.05, 10, 40), nylon(acc)); t.rotation.x = Math.PI / 2; t.position.y = h * f; g.add(t); }
-      bunker(g, [body], x, z, 0, { t: 'c', r });
-    };
-  }
-  function dorito(R, h, main, acc) {
-    return (x, z, rot) => {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(triGeo(R, h, 0.18), nylon(main)); g.add(body);
-      const band = new THREE.Mesh(triGeo(R + 0.03, 0.2, 0.07), nylon(acc)); band.position.y = h * 0.55; g.add(band);
-      bunker(g, [body], x, z, rot, { t: 'c', r: R * 0.72 });
-    };
-  }
-  function snake(len, main, acc) {
-    return (x, z, rot) => {
-      const g = new THREE.Group(), r = 0.44, n = Math.round(len / 1.5), step = len / n, bodies = [];
-      for (let i = 0; i < n; i++) {
-        const seg = new THREE.Mesh(new THREE.CapsuleGeometry(r, step - 0.3, 8, 20), nylon(main));
-        seg.rotation.z = Math.PI / 2; seg.position.set(-len / 2 + step * (i + 0.5), r, 0); seg.scale.set(1.04, 1, 1);
-        g.add(seg); bodies.push(seg);
-        if (i) { const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 0.93, 0.06, 10, 28), nylon(acc)); ring.rotation.y = Math.PI / 2; ring.position.set(-len / 2 + step * i, r, 0); g.add(ring); }
-      }
-      bunker(g, bodies, x, z, rot, { t: 'b', hw: len / 2 + r, hd: r });
-    };
-  }
-
-  const B = {
-    brick: box(1.0, 2.6, 1.25, 0xf3f3f3, 0xff3b30),
-    lowbrick: box(2.3, 0.9, 1.05, 0xf3f3f3, 0xff3b30),
-    temple: box(1.3, 2.6, 1.85, 0x00c2a8, 0x0d3b66),
-    maya: box(1.45, 1.45, 2.5, 0x00c2a8, 0x0d3b66),
-    can: can(0.6, 1.9, 0x1fb5ff, 0xffffff),
-    tallcan: can(0.66, 2.45, 0x7b2ff7, 0xffcc00),
-    minican: can(0.5, 1.15, 0x1fb5ff, 0xffffff),
-    cake: can(1.7, 1.1, 0xff2d6f, 0xffffff),
-    dorito: dorito(1.05, 1.3, 0xff7a00, 0xffffff),
-    snake: snake(10, 0xffcc00, 0x1b1b1b),
-  };
-  // mirrored layout: every piece on the blue half gets a twin on the red half
-  const place = (fn, x, z, rot = 0) => { fn(x, z, rot); fn(-x, z, Math.PI - rot); };
-  place(B.brick, -21, 0);
-  place(B.can, -17.5, -5); place(B.can, -17.5, 5);
-  place(B.temple, -13.5, 2.6);
-  place(B.maya, -10, -5.5, 0.35);
-  place(B.minican, -8, 3);
-  place(B.lowbrick, -6, -2, 0.3);
-  place(B.tallcan, -4.5, 6.5);
-  place(B.dorito, -12.5, 10.5, 0.4); place(B.dorito, -7, 12.6, -0.3); place(B.dorito, -19, 10.5, 1);
-  place(B.lowbrick, -18.5, -11, 0);
-  place(B.snake, -9, -13, 0);
-  B.cake(0, 0, 0);
-  B.dorito(0, 11.3, Math.PI / 2);
-  B.temple(0, -8.5, Math.PI / 2);
-  scene.updateMatrixWorld(true);
-  // The room reflections are mainly for the marker; keep them subtle on the field itself.
-  scene.traverse((o) => {
-    const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
-    for (const m of ms) if ('envMapIntensity' in m) m.envMapIntensity = 0.12;
-  });
-
-  // cover spots around every bunker
+  // ---- map: theme + bunkers ----
+  const arena = new THREE.Group(); scene.add(arena);
   const cover = [];
-  const off = 0.38 + 0.4;
-  for (const s of shapes) {
-    const local = s.t === 'c'
-      ? [...Array(8)].map((_, i) => [Math.cos(i * Math.PI / 4) * (s.r + off), Math.sin(i * Math.PI / 4) * (s.r + off)])
-      : [[s.hw + off, 0], [-s.hw - off, 0], [0, s.hd + off], [0, -s.hd - off],
-         ...(s.hw > 1.2 ? [[s.hw * 0.6, s.hd + off], [-s.hw * 0.6, s.hd + off], [s.hw * 0.6, -s.hd - off], [-s.hw * 0.6, -s.hd - off]] : []),
-         ...(s.hd > 1.2 ? [[s.hw + off, s.hd * 0.6], [s.hw + off, -s.hd * 0.6], [-s.hw - off, s.hd * 0.6], [-s.hw - off, -s.hd * 0.6]] : [])];
-    for (const [lx, lz] of local) {
-      const [x, z] = s.t === 'c' ? [s.x + lx, s.z + lz] : toWorld(s, lx, lz);
-      if (Math.abs(x) < BOUND.hw - 0.6 && Math.abs(z) < BOUND.hd - 0.6 && !insideAny(x, z, 0.36)) cover.push({ x, z });
+  const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+  const proxyGeo = {
+    b: (K) => new THREE.BoxGeometry(K.w, K.h, K.d).translate(0, K.h / 2, 0),
+    c: (K) => new THREE.CylinderGeometry(K.r, K.r, K.h, 16).translate(0, K.h / 2, 0),
+    t: (K) => new THREE.CylinderGeometry(K.R, K.R, K.h, 3).rotateY(Math.PI / 2).translate(0, K.h / 2, 0),
+  };
+  let groundTex = [];
+
+  function applyTheme(th) {
+    for (const t of groundTex) t.dispose();
+    fieldMat.map = fieldTexture(th); fieldMat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    fieldMat.emissiveMap = th.glow ? fieldMat.map : null;
+    fieldMat.emissive.set(th.glow ? 0xffffff : 0x000000); fieldMat.emissiveIntensity = th.glow || 0;
+    apronMat.map = noiseTexture(th.apron, th.ground); apronMat.map.repeat.set(14, 9);
+    outerMat.map = noiseTexture(th.outer, th.ground); outerMat.map.repeat.set(90, 90);
+    for (const m of [fieldMat, apronMat, outerMat]) m.needsUpdate = true;
+    groundTex = [fieldMat.map, apronMat.map, outerMat.map];
+    pathMat.color.set(th.path);
+    skyU.top.value.set(th.sky[0]); skyU.bottom.value.set(th.sky[1]);
+    scene.background.set(th.fog[0]); scene.fog.color.set(th.fog[0]); scene.fog.near = th.fog[1]; scene.fog.far = th.fog[2];
+    hemi.color.set(th.hemi[0]); hemi.groundColor.set(th.hemi[1]); hemi.intensity = th.hemi[2];
+    sun.color.set(th.sun[0]); sun.intensity = th.sun[1]; sun.position.set(...th.sun[2]);
+    renderer.toneMappingExposure = th.exposure;
+    hillMat.color.set(th.hills);
+    const tc = TREE_COLORS[th.trees];
+    const n = Math.round(treeMax * (TREE_COUNT[th.trees] ?? 0.75));
+    trunks.count = crowns.count = tc ? n : 0;
+    if (tc) {
+      for (let i = 0; i < n; i++) crowns.setColorAt(i, col.setHSL(rnd(...tc[0]), rnd(...tc[1]), rnd(...tc[2])));
+      crowns.instanceColor.needsUpdate = true;
     }
+  }
+
+  function clearArena() {
+    for (const c of [...arena.children]) {
+      c.traverse((m) => { if (m.isMesh && m.geometry && !m.geometry.userData.shared) m.geometry.dispose(); });
+      arena.remove(c);
+    }
+    shapes.length = 0; bunkerMeshes.length = 0; cover.length = 0;
+  }
+
+  function placeBunker(style, kind, x, z, rot) {
+    const K = KINDS[kind];
+    const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot;
+    let colliders = buildBunker(style, kind, g, { high });
+    shadowy(g);
+    g.traverse((m) => { if (m.isMesh && m.material && 'envMapIntensity' in m.material) m.material.envMapIntensity = 0.12; });
+    if (!colliders) {
+      const p = new THREE.Mesh(proxyGeo[K.t](K), proxyMat);
+      p.castShadow = p.receiveShadow = false;
+      g.add(p); colliders = [p];
+    }
+    arena.add(g);
+    bunkerMeshes.push(...colliders);
+    shapes.push(K.t === 'b' ? { t: 'b', x, z, rot, hw: K.w / 2, hd: K.d / 2 } : { t: 'c', x, z, rot, r: K.r });
+  }
+
+  function computeCover() {
+    const off = 0.38 + 0.4;
+    for (const s of shapes) {
+      const local = s.t === 'c'
+        ? [...Array(8)].map((_, i) => [Math.cos(i * Math.PI / 4) * (s.r + off), Math.sin(i * Math.PI / 4) * (s.r + off)])
+        : [[s.hw + off, 0], [-s.hw - off, 0], [0, s.hd + off], [0, -s.hd - off],
+          ...(s.hw > 1.2 ? [[s.hw * 0.6, s.hd + off], [-s.hw * 0.6, s.hd + off], [s.hw * 0.6, -s.hd - off], [-s.hw * 0.6, -s.hd - off]] : []),
+          ...(s.hd > 1.2 ? [[s.hw + off, s.hd * 0.6], [s.hw + off, -s.hd * 0.6], [-s.hw - off, s.hd * 0.6], [-s.hw - off, -s.hd * 0.6]] : [])];
+      for (const [lx, lz] of local) {
+        const [x, z] = s.t === 'c' ? [s.x + lx, s.z + lz] : toWorld(s, lx, lz);
+        if (Math.abs(x) < BOUND.hw - 0.6 && Math.abs(z) < BOUND.hd - 0.6 && !insideAny(x, z, 0.36)) cover.push({ x, z });
+      }
+    }
+  }
+
+  /** Swap in a map: theme, bunkers, collision shapes and bot cover spots. */
+  function loadMap(id) {
+    const map = mapById(id);
+    clearSplats();
+    clearArena();
+    applyTheme(map.theme);
+    for (const [kind, x, z, rot = 0] of map.layout) {
+      placeBunker(map.style, kind, x, z, rot);
+      if (x !== 0) placeBunker(map.style, kind, -x, z, Math.PI - rot); // mirror onto the red half
+    }
+    arena.updateMatrixWorld(true);
+    computeCover();
+    return map;
   }
 
   // ---- paint decals ----
@@ -519,5 +466,5 @@ export function createWorld(canvas, high) {
     }
   }
 
-  return { renderer, scene, camera, bunkerMeshes, cover, addSplat, clearSplats, puff, update };
+  return { renderer, scene, camera, bunkerMeshes, cover, addSplat, clearSplats, puff, update, loadMap };
 }

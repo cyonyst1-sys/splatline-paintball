@@ -48,14 +48,30 @@ Spend them on the **Upgrade marker** screen:
 
 Progress is saved in your browser (localStorage), so it stays on this device and browser.
 
-## The field
+## Maps
 
-A mirrored 50 × 30 m field with inflatable bunkers: snakes, doritos, cans, bricks, temples, a Maya tower and a centre cake. Around it are netting, team tents, flags, bleachers with spectators and a tree line. Paint splats stick to bunkers, the turf and tagged players.
+Pick a map with the arrows on the home screen (or **🎲 Random**). In multiplayer the host picks it in the lobby. Every map has its own bunker style, layout, ground, sky and lighting, and both halves are mirrored so neither team has an advantage.
+
+| Map | Bunker style | Setting |
+| --- | --- | --- |
+| Center Stage | Classic tournament inflatables | Sunny day |
+| Neon Nights | Glowing neon inflatables | Night |
+| Timberline | Plank walls, logs, stumps, cable spools | Woodsball forest |
+| Downtown | Jersey barriers, shipping containers, dumpsters, traffic drums | Overcast city lot |
+| Tire Yard | Stacked tires and a tractor tire | Dirt yard |
+| Harvest | Square and round hay bales | Farm at golden hour |
+| Outpost | Sandbag walls, oil drums, ammo crates | Dusty military camp |
+| Dune Ruins | Adobe walls, stone columns, clay urns, boulders | Desert |
+| Frostbite | Snow brick walls, ice blocks, snowmen, an igloo | Snowfield |
+| Scrapyard | Pallet stacks, rusty containers, culvert pipes, junk piles | Dusk |
+
+Each field is 50 × 30 m with netting, team tents, flags, bleachers and scenery that matches the map. Paint splats stick to bunkers, the ground and tagged players.
 
 ## Code
 
 - `index.html`: page, menus, HUD and styles
-- `src/world.js`: scene, field, bunkers, scenery, paint decals and collision helpers
+- `src/world.js`: scene, scenery, map loading, paint decals and collision helpers
+- `src/maps.js`: the 10 maps: bunker styles, layouts and themes
 - `src/main.js`: game loop, player and bot logic, shooting, menus
 - `src/economy.js`: coins, upgrades, saved progress
 - `src/audio.js`: procedural sound effects

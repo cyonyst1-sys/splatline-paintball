@@ -138,6 +138,14 @@
   .pop small { font-size:12px; letter-spacing:.14em; color:#fff; }
   @keyframes pop { 0% { transform:translateY(10px) scale(.7); opacity:0; } 15% { transform:none; opacity:1; } 100% { transform:translateY(-60px); opacity:0; } }
 
+  /* map picker */
+  .mappick { display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.06); border:1px solid var(--line); border-radius:12px; padding:6px; }
+  .mappick > div { flex:1; text-align:center; min-width:0; }
+  .mappick b { display:block; font-family:'Lilita One',system-ui; font-weight:400; font-size:20px; letter-spacing:.03em; }
+  .mappick small { display:block; color:var(--muted); font-size:12px; line-height:1.3; }
+  .mappick .arrow { width:38px; height:38px; flex:none; border-radius:9px; border:1px solid var(--line); background:rgba(255,255,255,.06); font-size:14px; }
+  .mappick .arrow:hover { background:rgba(255,255,255,.14); }
+  .mappick .arrow.hidden { display:block !important; visibility:hidden; }
   /* multiplayer */
   .txt { width:100%; padding:11px 14px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.06); color:var(--ink); font:600 16px Inter,system-ui,sans-serif; }
   .txt:focus { outline:2px solid var(--accent); outline-offset:1px; }
@@ -203,6 +211,12 @@
     <div class="seg" id="diff">
       <button data-d="easy">Easy ×0.75</button><button data-d="normal">Normal ×1</button><button data-d="hard">Hard ×1.5</button>
     </div>
+    <div class="label">MAP</div>
+    <div class="mappick" id="mapPick">
+      <button class="arrow" data-d="-1" aria-label="Previous map">◀</button>
+      <div><b id="mapName"></b><small id="mapDesc"></small></div>
+      <button class="arrow" data-d="1" aria-label="Next map">▶</button>
+    </div>
     <button class="btn" id="btnMP">👥 Multiplayer</button>
     <button class="btn" id="btnShop">🔧 Upgrade marker</button>
     <button class="btn" id="btnSettings">⚙️ Settings</button>
@@ -259,6 +273,11 @@
       <button class="btn" id="btnCopy" style="width:auto">🔗 Copy invite link</button>
     </div>
     <div class="seg" id="lobbyMode"><button data-m="teams">Teams</button><button data-m="coop">Co-op vs bots</button></div>
+    <div class="mappick" id="lobbyMapPick" style="margin-top:10px">
+      <button class="arrow" data-d="-1" aria-label="Previous map">◀</button>
+      <div><b id="lobbyMapName"></b><small id="lobbyMapDesc"></small></div>
+      <button class="arrow" data-d="1" aria-label="Next map">▶</button>
+    </div>
     <ul id="lobbyList"></ul>
     <p id="lobbyBots" class="small"></p>
     <p class="small">The host's browser runs the match, so the host should keep this tab open and in front.</p>
