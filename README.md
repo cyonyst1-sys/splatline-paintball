@@ -10,16 +10,13 @@ You play on Blue with three bot teammates against four Red bots on an outdoor fi
 
 | Control | Action |
 | --- | --- |
-| WASD / arrows | Move your legs (forward, back, strafe) |
-| Mouse | Look and aim, independently of your legs (click the game to lock the mouse) |
+| WASD / arrows | Move |
+| Mouse | Look and aim (click the game to lock the mouse) |
 | Left or right click | Fire one paintball (semi-auto); alternate buttons to shoot faster |
 | Q / E (hold) | Lean left / right around cover (only your upper body is exposed) |
 | Space | Dive and slide low |
 | Shift | Sprint (less accurate) |
-| C | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings) |
-
-**Free look:** once you're moving, your legs keep their heading while you look and shoot anywhere. Stop and your body turns to face your view; look more than ~100° away and your body turns with you. The LEGS arrow on the HUD shows where your legs point.
-| R | Reload |
+| C | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings) || R | Reload |
 | Esc / P | Pause |
 
 ## Multiplayer

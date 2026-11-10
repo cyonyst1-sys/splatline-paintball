@@ -127,11 +127,6 @@
   #reloadBar i { display:block; height:100%; width:calc(var(--p) * 100%); background:var(--accent); }
   #stance { font-size:11px; letter-spacing:.14em; color:var(--muted); min-height:1em; margin-top:4px; }
   #status { position:absolute; bottom:160px; left:0; right:0; text-align:center; font-size:20px; text-shadow:0 2px 6px rgba(0,0,0,.8); }
-  #legs { --r:0deg; position:absolute; left:50%; bottom:84px; width:54px; height:54px; margin-left:-27px; border-radius:50%;
-    background:var(--glass); border:1px solid var(--line); }
-  #legs i { position:absolute; left:50%; top:50%; width:0; height:0; margin:-13px 0 0 -8px; border-left:8px solid transparent; border-right:8px solid transparent;
-    border-bottom:22px solid var(--accent); transform-origin:8px 13px; transform:rotate(var(--r)); }
-  #legs span { position:absolute; left:0; right:0; bottom:-16px; text-align:center; font-size:9px; letter-spacing:.16em; color:var(--muted); }
   #hint { position:absolute; left:16px; bottom:22px; background:var(--glass); border-radius:10px; padding:10px 14px; font-size:13px; color:#d7dfd9; font-weight:600; }
   #pops { position:absolute; left:50%; top:58%; transform:translateX(-50%); }
   .pop { font-size:24px; color:var(--gold); text-shadow:0 2px 6px rgba(0,0,0,.7); animation:pop 1.4s ease-out forwards; white-space:nowrap; text-align:center; }
@@ -177,7 +172,14 @@
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "./src/main.js": "./src/main.js?v=20261110024643",
+  "./src/world.js": "./src/world.js?v=20261110024643",
+  "./src/maps.js": "./src/maps.js?v=20261110024643",
+  "./src/marker.js": "./src/marker.js?v=20261110024643",
+  "./src/economy.js": "./src/economy.js?v=20261110024643",
+  "./src/audio.js": "./src/audio.js?v=20261110024643",
+  "./src/net.js": "./src/net.js?v=20261110024643"
 } }
 </script>
 </head>
@@ -194,7 +196,6 @@
   <div id="banner" class="hidden"></div>
   <div id="status" class="hidden"></div>
   <div id="clickPlay" class="hidden">Click to aim &amp; shoot</div>
-  <div id="legs" title="Which way your legs face, relative to your view"><i></i><span>LEGS</span></div>
   <div id="hint">Click (left or right) = one shot · WASD move · Q/E lean · Space dive · C crouch · Shift sprint · R reload · Esc pause</div>
   <div id="ammoBox"><div><span id="ammoNum">20</span><span id="ammoMag">/ 20</span></div><div id="reloadBar" class="hidden"><i></i></div><div id="stance"></div></div>
   <div id="pops"></div>
@@ -310,8 +311,8 @@
     <h2>How to play</h2>
     <p>You're on <b class="blue">Blue</b> with three bot teammates against four <b class="red">Red</b> bots. One paintball hit and you're out for the round. First team to win 3 rounds takes the match.</p>
     <table>
-      <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move your legs: forward, back, strafe</td></tr>
-      <tr><td>Mouse</td><td>Look and aim, independently of your legs</td></tr>
+      <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move</td></tr>
+      <tr><td>Mouse</td><td>Look and aim</td></tr>
       <tr><td>Left <i>or</i> right click</td><td>Fire one paintball (semi-auto). Alternate buttons to shoot faster</td></tr>
       <tr><td><kbd>Q</kbd> / <kbd>E</kbd> (hold)</td><td>Lean left / right to peek and shoot around cover</td></tr>
       <tr><td><kbd>Space</kbd></td><td>Dive forward (or the way you're moving) and slide low</td></tr>
@@ -320,7 +321,6 @@
       <tr><td><kbd>R</kbd></td><td>Reload</td></tr>
       <tr><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pause</td></tr>
     </table>
-    <p><b>Free look:</b> once you start running, your legs keep going that way while you look and shoot anywhere, e.g. sprint to a bunker while firing down the line. The <b>LEGS</b> arrow at the bottom shows where your legs point. Stop moving and your body turns to face your view; look more than about 100° away and your body turns with you.</p>
     <p>Paintballs drop over distance, so aim a little high on far targets. Snakes and doritos are low: crouch to hide behind them. Leaning only exposes your upper body, so hug the side of a tall bunker and peek out with <kbd>Q</kbd>/<kbd>E</kbd>.</p>
     <button class="btn" id="helpBack" style="text-align:center">Back</button>
   </div>
@@ -353,6 +353,7 @@
 
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
-<script type="module" src="src/main.js"></script>
+<!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
+<script type="module" src="src/main.js?v=20261110024643"></script>
 </body>
 </html>

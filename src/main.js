@@ -307,11 +307,8 @@ function clampNeck(p) {
 function updateHuman(p, dt) {
   const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
   const s = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-  const wantsMove = f !== 0 || s !== 0;
-
-  // Legs keep their heading while you move; standing still, the body turns to face your view.
-  if (!wantsMove && p.diveT <= 0) p.bodyAng += angDiff(p.ang, p.bodyAng) * Math.min(1, dt * 6);
-  clampNeck(p);
+  // your body always faces where you look; WASD moves relative to the camera
+  p.bodyAng = p.ang;
 
   // crouch (hold or toggle)
   const cKey = !!keys.KeyC;
@@ -319,8 +316,8 @@ function updateHuman(p, dt) {
   else p.crouch = cKey;
   p.cWas = cKey;
 
-  // movement direction in the world, relative to where the legs face
-  const ca = Math.cos(p.bodyAng), sa = Math.sin(p.bodyAng);
+  // movement direction in the world, relative to the view
+  const ca = Math.cos(p.ang), sa = Math.sin(p.ang);
   let mx = ca * f - sa * s, mz = sa * f + ca * s;
   const len = Math.hypot(mx, mz);
 
@@ -341,9 +338,7 @@ function updateHuman(p, dt) {
     if (p.diveT <= 0) { p.diveT = 0; p.diveCd = 0.5; }
   } else {
     p.sprint = !!(keys.ShiftLeft || keys.ShiftRight) && f > 0 && !p.crouch && Math.abs(p.lean) < 0.2;
-    // forward is fastest, strafing a bit slower, backpedalling slowest
-    const base = p.crouch ? 2.4 : p.sprint ? 7.2 : 4.8;
-    const sp = f < 0 ? base * 0.75 : f === 0 ? base * 0.9 : base;
+    const sp = p.crouch ? 2.4 : p.sprint ? 7.2 : 4.8;
     if (len > 0) { mx = mx / len * sp; mz = mz / len * sp; }
     const k = Math.min(1, dt * 12);
     p.mvx += (mx - p.mvx) * k; p.mvz += (mz - p.mvz) * k;
@@ -886,8 +881,6 @@ function renderHud() {
   $('reloadBar').classList.toggle('hidden', !(h.reload > 0));
   const leanTxt = h.lean < -0.3 ? 'LEAN ◀' : h.lean > 0.3 ? 'LEAN ▶' : '';
   $('stance').textContent = h.diveT > 0 ? 'DIVE' : [h.crouch ? 'CROUCHED' : h.sprint ? 'SPRINT' : '', leanTxt].filter(Boolean).join(' · ');
-  $('legs').style.setProperty('--r', (angDiff(h.bodyAng, h.ang) * 180 / Math.PI).toFixed(1) + 'deg');
-  $('legs').classList.toggle('hidden', !h.alive);
   const gap = 5 + currentSpread(h) * 500;
   $('cross').style.setProperty('--g', gap.toFixed(1) + 'px');
   $('cross').classList.toggle('hidden', !h.alive);
