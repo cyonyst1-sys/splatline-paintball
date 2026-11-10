@@ -642,21 +642,22 @@ export function buildBunker(style, kind, group, o) {
 // tower (solid), pillar (round support), deco (no collision).
 export const CASTLE_H1 = 3.2, CASTLE_H2 = 6.4;
 export function castlePlan() {
-  const P = [], H1 = CASTLE_H1, H2 = CASTLE_H2, OW = 4.6, KW = 7.6, PI2 = PI / 2;
-  // slits at standing eye height, plus crouch-height slits in the parapets
-  const outerBands = [[1.15, 1.75], [3.95, 4.35]], keepBands = [[1.15, 1.75], [4.35, 4.95], [7.15, 7.5]];
+  // Parapets stand 1 m above the wall-walk and roof: stand up to shoot over them, crouch to hide behind them.
+  const P = [], H1 = CASTLE_H1, H2 = CASTLE_H2, OW = H1 + 1.0, KW = H2 + 1.0, PI2 = PI / 2;
+  // arrow slits at standing eye height on the ground floor and the keep's 2nd floor
+  const outerBands = [[1.15, 1.75]], keepBands = [[1.15, 1.75], [4.35, 4.95]];
   const wall = (x, z, rot, w, d, y0, y1, bands, crenel = true) => P.push({ type: 'wall', x, z, rot, w, d, y0, y1, bands, crenel });
   const floor = (x, z, w, d, top) => P.push({ type: 'floor', x, z, rot: 0, w, d, top });
   const ramp = (x, z, rot, w, d, h0, h1) => P.push({ type: 'ramp', x, z, rot, w, d, h0, h1, base: Math.min(h0, h1) });
 
   // outer curtain wall: 28 x 36 m, main gate in the front (west), side gates north and south
   wall(-14, -10.5, PI2, 15, 1, 0, OW, outerBands); wall(-14, 10.5, PI2, 15, 1, 0, OW, outerBands);
-  wall(-14, 0, PI2, 6, 1, 3.0, OW, [[3.95, 4.35]]); // over the main gate
+  wall(-14, 0, PI2, 6, 1, 3.0, OW, []); // over the main gate
   wall(14, 0, PI2, 36, 1, 0, OW, outerBands);
   for (const s of [-1, 1]) {
     wall(-12, s * 18, 0, 4, 1, 0, OW, outerBands);
     wall(3.5, s * 18, 0, 21, 1, 0, OW, outerBands);
-    wall(-8.5, s * 18, 0, 3, 1, 3.0, OW, [[3.95, 4.35]]); // over the side gate
+    wall(-8.5, s * 18, 0, 3, 1, 3.0, OW, []); // over the side gate
     // wall-walks along the north/south walls and ramps up to them from the courtyard
     floor(0, s * 16.5, 27, 2, H1);
     ramp(6, s * 14.5, PI, 8, 2, 0, H1);
@@ -687,8 +688,9 @@ export function castlePlan() {
     // (roof: head for the bottom of ramp 2, so you drop onto it and walk down to the 2nd floor)
     holes: { roof: { x: 3.8, z: -6.4 }, floor2: { x: 8, z: 6.4 } }, keep: { x: 5, z: 0, hw: 7.5, hd: 8.5 },
     // where defenders spawn and hold: wall-walks, 2nd-floor windows, roof, throne room
-    defend: [{ x: -12.5, z: -9, y: H1 }, { x: -12.5, z: 9, y: H1 }, { x: -0.8, z: -3, y: H1 }, { x: -0.8, z: 3, y: H1 },
-      { x: -0.8, z: 0.5, y: H2 }, { x: 9.5, z: 3, y: 0 }],
+    // (hunker: spots behind a 1 m parapet, where crouching keeps your body hidden while you can still see over)
+    defend: [{ x: -12.5, z: -9, y: H1, hunker: true }, { x: -12.5, z: 9, y: H1, hunker: true }, { x: -0.8, z: -3, y: H1 }, { x: -0.8, z: 3, y: H1 },
+      { x: -0.8, z: 0.5, y: H2, hunker: true }, { x: 9.5, z: 3, y: 0 }],
     // courtyard cover, built in the map's own bunker style
     yard: [['wall', -9, -5, PI2], ['wall', -9, 5, PI2], ['tall', -6, -12.5], ['tall', -6, 12.5], ['block', -11, 0], ['can', 9, -12], ['can', 9, 12]],
   };
@@ -717,7 +719,8 @@ function wallPieces(kit, m, L, D, y0, y1, bands, crenel) {
     y = b;
   }
   if (y1 > y) kit.add(m, G.box, 0, (y + y1) / 2, 0, L, y1 - y, D);
-  if (crenel) for (let x = -L / 2 + 0.35; x <= L / 2 - 0.34; x += 1.4) kit.add(m, G.box, x, y1 + 0.25, 0, 0.7, 0.5, D);
+  // battlements: short, narrow merlons with wide gaps to shoot through
+  if (crenel) for (let x = -L / 2 + 0.3; x <= L / 2 - 0.29; x += 1.6) kit.add(m, G.box, x, y1 + 0.18, 0, 0.55, 0.36, D);
 }
 /** Build one castle part into `group` (positioned by the caller); all its meshes are colliders. */
 export function buildCastlePart(part, castle, group) {

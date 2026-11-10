@@ -37,10 +37,11 @@ const REWARD = { tag: 25, round: 40, win: 150, play: 30, capture: 60, ret: 15 };
 export const MODES = {
   elim: { name: 'Elimination', desc: "One hit and you're out. First team to win 3 rounds.", teamSize: 4 },
   ctf: { name: 'Capture the Flag', desc: 'Infinite respawns. Bring their flag to yours. First to 3 captures, or most in 6 min.', teamSize: 6 },
-  koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 3 lives each. Hold the throne room to win.', teamSize: 6 },
+  koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 5 lives each. Hold the throne room to win.', teamSize: 6 },
 };
 const CTF = { caps: 3, time: 360, returnT: 20, pickR: 1.4, capR: 2.6 };
-const KOTH = { time: 240, lives: 3, capSecs: 30, rounds: 2 };
+// attackRespawn: attackers wait longer than defenders, which gives the castle time to regroup
+const KOTH = { time: 240, lives: 5, capSecs: 55, rounds: 2, attackRespawn: 9, defendRespawn: 3 };
 const RESPAWN_T = 4, PROTECT_T = 2.5;
 
 // ---------- models ----------
@@ -332,7 +333,8 @@ function eliminate(p, by, point, rs) {
   const local = net.mode !== 'client';
   if (local && respawnMode()) {
     if (p.lives !== Infinity) p.lives--;
-    p.respawnT = p.lives > 0 ? (gameMode === 'ctf' ? 6 : RESPAWN_T) : 0;
+    p.respawnT = p.lives <= 0 ? 0 : gameMode === 'ctf' ? 6
+      : gameMode === 'koth' ? (p.team === attackers() ? KOTH.attackRespawn : KOTH.defendRespawn) : RESPAWN_T;
   } else if (!local) p.respawnT = rs || 0;
   if (net.mode === 'host') broadcast({ t: 'tag', v: slotIdx(p), b: slotIdx(by), pt: vec(point), rs: p.respawnT });
   if (local && flagsSt) for (const F of flagsSt) if (F.st === 1 && F.carrier === slotIdx(p)) dropFlag(F, p);
@@ -505,7 +507,8 @@ function objectiveFor(b) {
     if (b.team === att) return { x: zn.x + ((b.i % 3) - 1) * 1.1, z: zn.z + (((b.i / 3) | 0) - 0.5) * 1.6, rush: dist(b, zn) < 24 };
     const c = world.info.castle, onGround = b.y < 0.6;
     // only half the defenders leave their posts, and only once the capture is really under way
-    const alarm = (koth.att >= 2 || koth.progress > 0.12) && (onGround || b.i % 2 === 0);
+    // (past 40% captured, everyone abandons their post to save the throne room)
+    const alarm = ((koth.att >= 2 || koth.progress > 0.12) && (onGround || b.i % 2 === 0)) || koth.progress > 0.4;
     if (onGround && (alarm || (b.spot && b.spot.y > 0.6))) return { x: zn.x, z: zn.z, rush: true, hold: dist(b, zn) < zn.r - 0.8 };
     if (alarm) { // come down to defend the throne room: drop through a stairwell, or hop off the wall-walk
       const inKeep = Math.abs(b.x - c.keep.x) < c.keep.hw && Math.abs(b.z - c.keep.z) < c.keep.hd;
@@ -536,7 +539,9 @@ function updateBot(b, dt) {
     b.tgt = best; b.td = bd;
   }
   if (b.ammo < b.mag && b.reload <= 0 && (b.ammo === 0 || (!b.tgt && b.ammo < 8))) startReload(b);
-  b.crouch = b.reload > 0;
+  // castle defenders behind a parapet fight crouched: eyes over the wall, body behind it
+  const hunker = gameMode === 'koth' && b.spot && b.spot.hunker && b.team !== attackers() && b.y > 0.6 && dist(b, b.spot) < 2;
+  b.crouch = b.reload > 0 || hunker;
 
   if (b.tgt) {
     const t = b.tgt, td = Math.hypot(t.x - b.x, t.z - b.z);
@@ -549,9 +554,12 @@ function updateBot(b, dt) {
     b.ang += da * Math.min(1, dt * 9);
     const muzzleY = eyeY(b) - 0.25;
     b.pitch = Math.atan2(chestY(t) + 0.5 * GRAV * ft * ft - muzzleY, Math.max(0.5, td));
-    if (b.seen > D.react + (respawnMode() ? 0.25 : 0) && b.cd <= 0 && b.reload <= 0 && Math.abs(da) < 0.2) {
+    // castle defenders are braced behind walls: steadier aim and quicker reactions than the attackers
+    const castleDef = gameMode === 'koth' && b.team !== attackers();
+    const react = D.react + (respawnMode() ? (castleDef ? 0 : 0.25) : 0);
+    if (b.seen > react && b.cd <= 0 && b.reload <= 0 && Math.abs(da) < 0.2) {
       // paintballs wander more over long distances; respawn modes are a bit looser so attacks can get through
-      const err = D.err * (1 + Math.max(0, td - 12) / 20) * (respawnMode() ? 1.35 : 1);
+      const err = D.err * (1 + Math.max(0, td - 12) / 20) * (castleDef ? 0.85 : respawnMode() ? 1.35 : 1);
       const yaw = b.ang + gauss() * err, pitch = b.pitch + gauss() * err * 0.6;
       const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
       const pos = new THREE.Vector3(b.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + Math.sin(b.ang) * 0.55);
@@ -745,7 +753,7 @@ function kothUpdate(dt) {
   koth.att = a; koth.contested = a > 0 && d > 0;
   // more attackers capture faster, up to 3 at once; an empty room slowly resets
   if (a > 0 && d === 0) koth.progress = Math.min(1, koth.progress + dt / KOTH.capSecs * (1 + 0.25 * (Math.min(a, 3) - 1)));
-  else if (a === 0) koth.progress = Math.max(0, koth.progress - dt / (KOTH.capSecs * 1.5));
+  else if (a === 0) koth.progress = Math.max(0, koth.progress - dt / KOTH.capSecs * (d > 0 ? 3 : 1)); // defenders in the room win it back fast
   timeLeft -= dt;
   if (koth.progress >= 1) { koth.capTime[att] = KOTH.time - timeLeft; objEvent('castle', att, null); endRound(att, true); return; }
   if (!players.some((p) => p.team !== att && (p.alive || p.lives > 0))) { objEvent('wiped', 1 - att, null); endRound(att, true); return; }
@@ -1264,7 +1272,7 @@ function renderHud() {
   if (state === 'countdown') {
     const title = gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? 'CAPTURE THE FLAG'
       : `ROUND ${round} · <span style="color:${TEAMS[attackers()].css}">${TEAMS[attackers()].name} ATTACKS</span>`;
-    const sub = gameMode === 'koth' ? `<em>${h.team === attackers() ? 'Take the throne room in the keep' : 'Defend the castle · 3 lives'}</em>` : '';
+    const sub = gameMode === 'koth' ? `<em>${h.team === attackers() ? 'Take the throne room in the keep' : `Defend the castle · ${KOTH.lives} lives`}</em>` : '';
     banner = `${title}${sub}<small>${Math.ceil(timer)}</small>`;
   } else if (state === 'roundEnd') {
     banner = lastWinner < 0 ? 'DRAW' : `<span style="color:${TEAMS[lastWinner].css}">${TEAMS[lastWinner].name} ${gameMode === 'ctf' ? 'WINS!' : 'WINS THE ROUND'}</span>`;
