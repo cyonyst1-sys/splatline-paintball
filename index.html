@@ -138,9 +138,34 @@
   .pop small { font-size:12px; letter-spacing:.14em; color:#fff; }
   @keyframes pop { 0% { transform:translateY(10px) scale(.7); opacity:0; } 15% { transform:none; opacity:1; } 100% { transform:translateY(-60px); opacity:0; } }
 
+  /* multiplayer */
+  .txt { width:100%; padding:11px 14px; border-radius:10px; border:1px solid var(--line); background:rgba(255,255,255,.06); color:var(--ink); font:600 16px Inter,system-ui,sans-serif; }
+  .txt:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .txt.code { font-family:'Lilita One',system-ui; font-size:26px; letter-spacing:.3em; text-align:center; text-transform:uppercase; }
+  .mp-cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:12px; }
+  .mp-col { display:flex; flex-direction:column; gap:10px; background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:14px; padding:14px; }
+  .mp-col h3 { margin:0; font-size:16px; }
+  .mp-col .btn.primary { margin-top:auto; font-size:18px; }
+  .small { color:var(--muted); font-size:13px; margin:0; line-height:1.45; }
+  .mp-status { color:var(--accent); font-weight:700; min-height:1.3em; margin:6px 0 12px; text-align:center; }
+  .btn:disabled { opacity:.5; cursor:default; transform:none; }
+  .lobby-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  #lobbyCode { font-family:'Lilita One',system-ui; font-size:46px; letter-spacing:.18em; color:var(--accent); line-height:1; }
+  #lobbyList { list-style:none; padding:0; margin:14px 0 10px; display:flex; flex-direction:column; gap:6px; }
+  #lobbyList li { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.05); }
+  #lobbyList li i { width:10px; height:10px; border-radius:50%; flex:none; }
+  #lobbyList li small { font-size:10px; letter-spacing:.14em; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:1px 6px; }
+  #lobbyList li span { margin-left:auto; font-weight:800; font-size:12px; letter-spacing:.12em; }
+  #lobby .btn.primary { margin-top:14px; }
+  #toast { position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:20; max-width:min(92vw, 560px); background:#1d232a; border:1px solid var(--accent);
+    color:var(--ink); padding:12px 18px; border-radius:12px; font-weight:700; box-shadow:0 10px 30px rgba(0,0,0,.5); word-break:break-all; }
+  #clickPlay { position:absolute; left:50%; top:40%; transform:translateX(-50%); background:var(--glass); border:1px solid var(--accent); color:var(--accent);
+    padding:12px 20px; border-radius:12px; font-size:18px; }
+  @media (max-width:560px) { .mp-cols { grid-template-columns:1fr; } }
   #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#0b0f0c; font-family:'Lilita One',system-ui; font-size:28px; color:var(--muted); }
   @media (max-width:600px) { #home { background:rgba(5,8,12,.7); justify-content:center; } .home-col { margin:0; } }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -160,6 +185,7 @@
   <div id="hitmark"></div>
   <div id="banner" class="hidden"></div>
   <div id="status" class="hidden"></div>
+  <div id="clickPlay" class="hidden">Click to aim &amp; shoot</div>
   <div id="legs" title="Which way your legs face, relative to your view"><i></i><span>LEGS</span></div>
   <div id="hint">Click (left or right) = one shot · WASD move · Q/E lean · Space dive · C crouch · Shift sprint · R reload · Esc pause</div>
   <div id="ammoBox"><div><span id="ammoNum">20</span><span id="ammoMag">/ 20</span></div><div id="reloadBar" class="hidden"><i></i></div><div id="stance"></div></div>
@@ -177,6 +203,7 @@
     <div class="seg" id="diff">
       <button data-d="easy">Easy ×0.75</button><button data-d="normal">Normal ×1</button><button data-d="hard">Hard ×1.5</button>
     </div>
+    <button class="btn" id="btnMP">👥 Multiplayer</button>
     <button class="btn" id="btnShop">🔧 Upgrade marker</button>
     <button class="btn" id="btnSettings">⚙️ Settings</button>
     <button class="btn" id="btnHelp">❓ How to play</button>
@@ -199,6 +226,49 @@
     <p style="color:var(--muted);font-size:13px;margin:14px 0 0">Earn coins by tagging opponents (+25), winning rounds (+40), finishing a match (+30) and winning it (+150). Difficulty multiplies every reward.</p>
   </div>
 </div>
+
+<!-- Multiplayer -->
+<div id="mp" class="screen dim hidden">
+  <div class="panel" style="max-width:560px">
+    <h2>Multiplayer</h2>
+    <div class="field"><label for="mpName">Your name</label><input id="mpName" class="txt" maxlength="14" placeholder="Player" autocomplete="off"></div>
+    <div class="mp-cols">
+      <div class="mp-col">
+        <h3>Host a room</h3>
+        <div class="seg" id="mpMode"><button data-m="teams" class="on">Teams</button><button data-m="coop">Co-op</button></div>
+        <p class="small">Teams: players split Blue vs Red. Co-op: everyone on Blue vs bots.</p>
+        <button class="btn primary" id="btnHost">CREATE ROOM</button>
+      </div>
+      <div class="mp-col">
+        <h3>Join a room</h3>
+        <input id="mpCode" class="txt code" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
+        <p class="small">Get the 5-character code (or invite link) from the host.</p>
+        <button class="btn primary" id="btnJoin">JOIN</button>
+      </div>
+    </div>
+    <p id="mpStatus" class="mp-status"></p>
+    <button class="btn" id="mpBack" style="text-align:center">Back</button>
+  </div>
+</div>
+
+<!-- Lobby -->
+<div id="lobby" class="screen dim hidden">
+  <div class="panel" style="max-width:520px">
+    <div class="lobby-head">
+      <div><div class="label">ROOM CODE</div><div id="lobbyCode">-----</div></div>
+      <button class="btn" id="btnCopy" style="width:auto">🔗 Copy invite link</button>
+    </div>
+    <div class="seg" id="lobbyMode"><button data-m="teams">Teams</button><button data-m="coop">Co-op vs bots</button></div>
+    <ul id="lobbyList"></ul>
+    <p id="lobbyBots" class="small"></p>
+    <p class="small">The host's browser runs the match, so the host should keep this tab open and in front.</p>
+    <button class="btn primary" id="btnStart">START MATCH</button>
+    <p id="lobbyWait" class="mp-status">Waiting for the host to start…</p>
+    <button class="btn" id="btnLeave" style="text-align:center;margin-top:10px">Leave room</button>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
 
 <!-- Settings -->
 <div id="settings" class="screen dim hidden">
@@ -240,7 +310,8 @@
 <!-- Pause -->
 <div id="pause" class="screen dim hidden">
   <div class="panel" style="max-width:360px;text-align:center">
-    <h2>Paused</h2>
+    <h2 id="pauseTitle">Paused</h2>
+    <p id="pauseNote" class="small hidden" style="margin-top:-8px">The match keeps going while this menu is open.</p>
     <div style="display:flex;flex-direction:column;gap:10px">
       <button class="btn primary" id="btnResume">RESUME</button>
       <button class="btn" id="btnQuit" style="text-align:center">Quit to home</button>

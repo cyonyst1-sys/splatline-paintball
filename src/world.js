@@ -7,7 +7,7 @@ export const FIELD = { hw: 25, hd: 15 };     // playing field half-size (metres)
 export const BOUND = { hw: 26.3, hd: 16.3 }; // where players can walk
 export const NETB = { hw: 27.5, hd: 17.5 };  // netting
 export const TEAMS = [
-  { name: 'BLUE', css: '#2f7dff', paintCss: '#1ec8ff', color: 0x2f7dff, paint: 0x1ec8ff, names: ['Ace', 'You', 'Moss', 'Dash'] },
+  { name: 'BLUE', css: '#2f7dff', paintCss: '#1ec8ff', color: 0x2f7dff, paint: 0x1ec8ff, names: ['Ace', 'Jet', 'Moss', 'Dash'] },
   { name: 'RED', css: '#ff4058', paintCss: '#ff2d8a', color: 0xff4058, paint: 0xff2d8a, names: ['Viper', 'Rook', 'Blaze', 'Fang'] },
 ];
 

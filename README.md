@@ -22,6 +22,16 @@ You play on Blue with three bot teammates against four Red bots on an outdoor fi
 | R | Reload |
 | Esc / P | Pause |
 
+## Multiplayer
+
+Click **Multiplayer** on the home screen.
+
+- **Host:** pick *Teams* (players split Blue vs Red) or *Co-op* (everyone on Blue vs bots), then **Create room**. Share the 5-character code or the invite link.
+- **Join:** enter the code (or open the invite link) and press **Join**.
+- Up to 8 players in Teams, 4 in Co-op. Bots fill every empty slot, and take over if someone leaves.
+- The host's browser runs the match, so the host should keep the game tab open and in front. If the host leaves, the room closes.
+- It's peer-to-peer (WebRTC via [PeerJS](https://peerjs.com/)). PeerJS's free public server only introduces the browsers to each other; no game server is needed. Some strict school or work networks block peer-to-peer connections.
+
 ## Coins and upgrades
 
 Earn coins for tagging opponents (+25), winning rounds (+40), finishing a match (+30) and winning it (+150). Easy pays ×0.75, Hard pays ×1.5.
@@ -49,6 +59,8 @@ A mirrored 50 × 30 m field with inflatable bunkers: snakes, doritos, cans, bric
 - `src/main.js`: game loop, player and bot logic, shooting, menus
 - `src/economy.js`: coins, upgrades, saved progress
 - `src/audio.js`: procedural sound effects
+- `src/net.js`: peer-to-peer rooms (host, join, messages)
+- `src/marker.js`: the procedural paintball marker model
 
 Every push to `main` redeploys the site on GitHub Pages within about a minute.
 

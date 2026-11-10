@@ -5,7 +5,7 @@ const defaults = () => ({
   coins: 0,
   up: { rate: 0, hopper: 0, reload: 0, barrel: 0, velocity: 0 },
   stats: { matches: 0, wins: 0, tags: 0 },
-  settings: { sens: 1, quality: 'high', volume: 0.8, diff: 'normal', crouchToggle: false },
+  settings: { sens: 1, quality: 'high', volume: 0.8, diff: 'normal', crouchToggle: false, name: '' },
 });
 
 function load() {
