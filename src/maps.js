@@ -126,6 +126,18 @@ const TEX = {
     blotch(g, S, 40, 'rgba(190,100,40,.35)', 8, 40); blotch(g, S, 30, 'rgba(40,20,10,.35)', 6, 30);
     speckle(g, S, 2500, ['rgba(220,140,70,.3)', 'rgba(30,15,5,.35)']);
   }),
+  greyStone: () => ctex('greyStone', 256, (g, S) => {
+    g.fillStyle = '#8d8c86'; g.fillRect(0, 0, S, S);
+    const rows = 5, h = S / rows;
+    for (let r = 0; r < rows; r++) {
+      const off = r % 2 ? S / 6 : 0;
+      for (let x = -S / 3 + off; x < S; x += S / 3) {
+        g.fillStyle = `hsl(45, ${rnd(2, 8)}%, ${rnd(48, 62)}%)`; g.fillRect(x + 3, r * h + 3, S / 3 - 6, h - 6);
+      }
+    }
+    speckle(g, S, 2500, ['rgba(40,40,40,.25)', 'rgba(230,230,220,.2)']);
+    blotch(g, S, 10, 'rgba(60,80,40,.18)', 10, 40);
+  }),
   crate: () => ctex('crate', 128, (g, S) => {
     g.fillStyle = '#9a6a3a'; g.fillRect(0, 0, S, S);
     g.strokeStyle = 'rgba(50,25,8,.35)'; for (let y = 0; y < S; y += 16) { g.beginPath(); g.moveTo(0, y); g.lineTo(S, y); g.stroke(); }
@@ -155,6 +167,9 @@ const MT = {
   odGreen: () => std('odGreen', { color: 0x4b5320, roughness: 0.6, metalness: 0.2 }),
   crate: () => std('crate', { map: TEX.crate(), roughness: 0.85 }, 0.9),
   stone: () => std('stone', { map: TEX.stone(), roughness: 0.95 }, 1.6),
+  greyStone: () => std('greyStone', { map: TEX.greyStone(), roughness: 0.95 }, 2.2),
+  gold: () => std('gold', { color: 0xd9a92a, roughness: 0.3, metalness: 0.8 }),
+  velvet: () => std('velvet', { color: 0x8a1c2c, roughness: 0.8 }),
   adobe: () => std('adobe', { map: TEX.adobe(), roughness: 0.97 }, 2.0),
   terracotta: () => std('terracotta', { color: 0xb5603a, roughness: 0.8 }),
   snow: () => std('snow', { map: TEX.snow(), roughness: 0.75 }, 1.0),
@@ -621,6 +636,118 @@ export function buildBunker(style, kind, group, o) {
   return Array.isArray(res) ? res : null;
 }
 
+// ---------- the castle (King of the Castle) ----------
+// Local coordinates: castle centre at the origin, attackers come from -x.
+// Parts: wall (box with arrow-slit bands and battlements), floor (walkable slab), ramp (walkable slope),
+// tower (solid), pillar (round support), deco (no collision).
+export const CASTLE_H1 = 3.2, CASTLE_H2 = 6.4;
+export function castlePlan() {
+  const P = [], H1 = CASTLE_H1, H2 = CASTLE_H2, OW = 4.6, KW = 7.6, PI2 = PI / 2;
+  // slits at standing eye height, plus crouch-height slits in the parapets
+  const outerBands = [[1.15, 1.75], [3.95, 4.35]], keepBands = [[1.15, 1.75], [4.35, 4.95], [7.15, 7.5]];
+  const wall = (x, z, rot, w, d, y0, y1, bands, crenel = true) => P.push({ type: 'wall', x, z, rot, w, d, y0, y1, bands, crenel });
+  const floor = (x, z, w, d, top) => P.push({ type: 'floor', x, z, rot: 0, w, d, top });
+  const ramp = (x, z, rot, w, d, h0, h1) => P.push({ type: 'ramp', x, z, rot, w, d, h0, h1, base: Math.min(h0, h1) });
+
+  // outer curtain wall: 28 x 36 m, main gate in the front (west), side gates north and south
+  wall(-14, -10.5, PI2, 15, 1, 0, OW, outerBands); wall(-14, 10.5, PI2, 15, 1, 0, OW, outerBands);
+  wall(-14, 0, PI2, 6, 1, 3.0, OW, [[3.95, 4.35]]); // over the main gate
+  wall(14, 0, PI2, 36, 1, 0, OW, outerBands);
+  for (const s of [-1, 1]) {
+    wall(-12, s * 18, 0, 4, 1, 0, OW, outerBands);
+    wall(3.5, s * 18, 0, 21, 1, 0, OW, outerBands);
+    wall(-8.5, s * 18, 0, 3, 1, 3.0, OW, [[3.95, 4.35]]); // over the side gate
+    // wall-walks along the north/south walls and ramps up to them from the courtyard
+    floor(0, s * 16.5, 27, 2, H1);
+    ramp(6, s * 14.5, PI, 8, 2, 0, H1);
+    floor(0.5, s * 14.5, 3, 2, H1); // landing at the top of the ramp, joined to the wall-walk
+  }
+  floor(-12.5, 0, 2, 31, H1); // west wall-walk, over the main gate
+  // corner towers sit just outside the corners so the wall-walks connect all the way round
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) P.push({ type: 'tower', x: sx * 15.5, z: sz * 19.5, w: 4, d: 4, h: 6.5 });
+
+  // the keep: 14 x 16 m, three levels (ground, 2nd floor, roof), doors front and back
+  for (const sx of [-2, 12]) {
+    wall(sx, -4.75, PI2, 6.5, 0.8, 0, KW, keepBands); wall(sx, 4.75, PI2, 6.5, 0.8, 0, KW, keepBands);
+    wall(sx, 0, PI2, 3, 0.8, 2.6, KW, keepBands.slice(1)); // above the door
+  }
+  for (const s of [-1, 1]) wall(5, s * 8, 0, 14.8, 0.8, 0, KW, keepBands);
+  // 2nd floor with a stairwell over ramp 1; roof with a stairwell over ramp 2
+  floor(5, -1.2, 13.2, 12.8, H1); floor(0.7, 6.4, 4.6, 2.4, H1);
+  floor(5, 1.2, 13.2, 12.8, H2); floor(0.7, -6.4, 4.6, 2.4, H2); floor(11.1, -6.4, 1, 2.4, H2);
+  ramp(6.8, 6.4, PI, 7.6, 2.4, 0, H1);   // ground -> 2nd floor (north side, rising toward the front)
+  ramp(6.8, -6.4, 0, 7.6, 2.4, H1, H2);  // 2nd floor -> roof (south side, rising toward the back)
+  for (const [x, z] of [[0.5, -4], [0.5, 3.5], [9.5, -3.6]]) P.push({ type: 'pillar', x, z, r: 0.45, h: H1 });
+  P.push({ type: 'deco', what: 'throne', x: 10.8, z: -1 });
+
+  return {
+    parts: P,
+    zone: { x: 6.4, z: -1, r: 3.2 }, // the throne room, on the keep's ground floor
+    // ways down for defenders rushing to the throne room: the stairwells over each ramp, and the keep's footprint
+    // (roof: head for the bottom of ramp 2, so you drop onto it and walk down to the 2nd floor)
+    holes: { roof: { x: 3.8, z: -6.4 }, floor2: { x: 8, z: 6.4 } }, keep: { x: 5, z: 0, hw: 7.5, hd: 8.5 },
+    // where defenders spawn and hold: wall-walks, 2nd-floor windows, roof, throne room
+    defend: [{ x: -12.5, z: -9, y: H1 }, { x: -12.5, z: 9, y: H1 }, { x: -0.8, z: -3, y: H1 }, { x: -0.8, z: 3, y: H1 },
+      { x: -0.8, z: 0.5, y: H2 }, { x: 9.5, z: 3, y: 0 }],
+    // courtyard cover, built in the map's own bunker style
+    yard: [['wall', -9, -5, PI2], ['wall', -9, 5, PI2], ['tall', -6, -12.5], ['tall', -6, 12.5], ['block', -11, 0], ['can', 9, -12], ['can', 9, 12]],
+  };
+}
+const CASTLE_MATS = {
+  stone: () => ({ wall: MT.greyStone(), floor: MT.planks(), ramp: MT.planks() }),
+  sand: () => ({ wall: MT.stone(), floor: MT.planks(), ramp: MT.planks() }),
+  snow: () => ({ wall: MT.snow(), floor: MT.snow(), ramp: MT.planks() }),
+};
+function rampGeo(L, D, h0, h1, base) {
+  const g = new THREE.BoxGeometry(L, 1, D).toNonIndexed(), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const t = (p.getX(i) + L / 2) / L; p.setY(i, p.getY(i) > 0 ? h0 + (h1 - h0) * t : base); }
+  g.computeVertexNormals();
+  return g;
+}
+function wallPieces(kit, m, L, D, y0, y1, bands, crenel) {
+  const spacing = 2.4, holeW = 0.32;
+  let y = y0;
+  for (const [a, b] of bands.filter(([a, b]) => a >= y0 && b <= y1).sort((p, q) => p[0] - q[0])) {
+    if (a > y) kit.add(m, G.box, 0, (y + a) / 2, 0, L, a - y, D);
+    const n = Math.max(0, Math.floor((L - 1.2) / spacing)), holes = [];
+    for (let i = 0; i < n; i++) holes.push(-((n - 1) * spacing) / 2 + i * spacing);
+    let x = -L / 2;
+    for (const hx of holes) { const l = hx - holeW / 2 - x; if (l > 0.01) kit.add(m, G.box, x + l / 2, (a + b) / 2, 0, l, b - a, D); x = hx + holeW / 2; }
+    if (L / 2 - x > 0.01) kit.add(m, G.box, (x + L / 2) / 2, (a + b) / 2, 0, L / 2 - x, b - a, D);
+    y = b;
+  }
+  if (y1 > y) kit.add(m, G.box, 0, (y + y1) / 2, 0, L, y1 - y, D);
+  if (crenel) for (let x = -L / 2 + 0.35; x <= L / 2 - 0.34; x += 1.4) kit.add(m, G.box, x, y1 + 0.25, 0, 0.7, 0.5, D);
+}
+/** Build one castle part into `group` (positioned by the caller); all its meshes are colliders. */
+export function buildCastlePart(part, castle, group) {
+  const M = CASTLE_MATS[castle](), kit = new Kit();
+  switch (part.type) {
+    case 'wall': wallPieces(kit, M.wall, part.w, part.d, part.y0, part.y1, part.bands || [], part.crenel); break;
+    case 'floor':
+      kit.add(M.floor, G.box, 0, part.top - 0.125, 0, part.w, 0.25, part.d);
+      kit.add(M.wall, G.box, 0, part.top - 0.32, 0, part.w * 0.98, 0.14, 0.25); // a beam underneath
+      break;
+    case 'ramp': kit.add(M.ramp, rampGeo(part.w, part.d, part.h0, part.h1, Math.max(0, part.base - 0.25))); break;
+    case 'tower':
+      kit.add(M.wall, G.box, 0, part.h / 2, 0, part.w, part.h, part.d);
+      for (const s of [-1, 1]) for (let a = -part.w / 2 + 0.35; a <= part.w / 2 - 0.34; a += 1.4) {
+        kit.add(M.wall, G.box, a, part.h + 0.3, s * (part.d / 2 - 0.3), 0.7, 0.6, 0.6);
+        kit.add(M.wall, G.box, s * (part.w / 2 - 0.3), part.h + 0.3, a, 0.6, 0.6, 0.7);
+      }
+      break;
+    case 'pillar': kit.add(M.wall, G.cyl, 0, part.h / 2, 0, part.r, part.h, part.r); break;
+    case 'deco': // throne
+      kit.add(MT.gold(), G.box, 0, 0.25, 0, 0.9, 0.5, 0.9);
+      kit.add(MT.velvet(), G.box, 0, 0.55, 0, 0.8, 0.1, 0.8);
+      kit.add(MT.gold(), G.box, 0.4, 1.1, 0, 0.12, 1.4, 0.9);
+      kit.add(MT.velvet(), G.box, 0.33, 1.0, 0, 0.04, 1.0, 0.7);
+      break;
+  }
+  kit.build(group);
+  return part.type === 'deco' ? [] : group.children.filter((c) => c.isMesh);
+}
+
 // ---------- themes ----------
 const T = {
   day: { ground: 'grass', field: '#3d8a3a', line: 'rgba(255,255,255,.9)', apron: '#336f31', outer: '#4a7a37', path: 0x9a8f7a,
@@ -699,4 +826,41 @@ export const MAPS = [
       ['cake', -9, 4], ['wall', -8, -6, 0.5], ['minican', -6, -12], ['tall', -5, 0, 0.4], ['bigcan', -19, 11], ['tri', -11, -12.5],
       ['container', 0, -1, PI / 2], ['cake', 0, 9]] },
 ];
+// ---------- large maps (100 x 60 m) for Capture the Flag and King of the Castle ----------
+// `layout` is the mirrored mid-field; `ctf` adds cover around both flag bases (mirrored);
+// `kothBase` is cover at the attackers' end; `castle` is the castle material (the castle sits at the red end).
+const LARGE = { hw: 50, hd: 30 };
+MAPS.push(
+  { id: 'highland', name: 'Highland Keep', style: 'wood', theme: T.woods, large: true, size: LARGE, castle: 'stone',
+    desc: 'Woodsball valley with a grey stone castle.',
+    layout: [['tall', -12, -6], ['tall', -12, 6], ['wall', -8, 0, PI / 2], ['can', -10, -14], ['can', -10, 14], ['block', -5, -10, 0.4],
+      ['block', -5, 10, -0.4], ['tri', -14, 0], ['minican', -6, -18], ['minican', -6, 18], ['temple', -3, -4], ['temple', -3, 4],
+      ['longwall', -36, -24], ['longwall', -36, 24], ['can', -26, -27], ['can', -26, 27], ['tall', -20, -24], ['tall', -20, 24],
+      ['snake', -12, -27], ['wall', -6, 24], ['tri', -43, -27, 0.5], ['tri', -43, 27, -0.5],
+      ['cake', 0, 0], ['tall', 0, -12, 0.78], ['tall', 0, 12, 0.78], ['longwall', 0, -24], ['bigcan', 0, 24]],
+    ctf: [['wall', -40, -4, PI / 2], ['wall', -40, 4, PI / 2], ['can', -44, -10], ['can', -44, 10], ['tall', -36, -12], ['tall', -36, 12],
+      ['block', -32, 0], ['tri', -30, -18], ['tri', -30, 18], ['minican', -46, -15], ['minican', -46, 15], ['temple', -24, -8], ['temple', -24, 8], ['can', -20, 0]],
+    kothBase: [['wall', -40, -5, PI / 2], ['wall', -40, 5, PI / 2], ['tall', -34, -12], ['tall', -34, 12], ['block', -30, 0],
+      ['tri', -26, -17], ['tri', -26, 17], ['can', -22, -6], ['can', -22, 6]] },
+  { id: 'citadel', name: 'Sandstone Citadel', style: 'desert', theme: T.dunes, large: true, size: LARGE, castle: 'sand',
+    desc: 'Desert ruins in front of a sandstone fortress.',
+    layout: [['longwall', -10, -8], ['longwall', -10, 8], ['can', -6, 0], ['tri', -13, -14], ['tri', -13, 14, 1], ['wall', -4, -15, PI / 2],
+      ['wall', -4, 15, PI / 2], ['minican', -8, -19], ['minican', -8, 19], ['tall', -14, 0, 0.78],
+      ['longwall', -40, -25], ['longwall', -28, 25], ['can', -33, 27], ['can', -21, -25], ['tall', -16, -25], ['tall', -40, 25.5], ['snake', -24, -28],
+      ['cake', 0, -6], ['cake', 0, 6], ['bigcan', 0, -18], ['bigcan', 0, 18], ['wall', 0, 0, PI / 2]],
+    ctf: [['longwall', -38, -6, PI / 2], ['longwall', -38, 6, PI / 2], ['can', -44, -12], ['can', -44, 12], ['tri', -33, 0], ['tall', -30, -12],
+      ['tall', -30, 12], ['minican', -46, -17], ['minican', -46, 17], ['wall', -24, -5], ['wall', -24, 5], ['block', -20, -12, 0.5], ['block', -20, 12, -0.5]],
+    kothBase: [['longwall', -38, -7, PI / 2], ['longwall', -38, 7, PI / 2], ['tri', -32, 0], ['tall', -28, -12], ['tall', -28, 12], ['wall', -22, -4], ['wall', -22, 4]] },
+  { id: 'frostgate', name: 'Frostgate', style: 'snow', theme: T.frost, large: true, size: LARGE, castle: 'snow',
+    desc: 'Snowfield battle under an ice-white castle.',
+    layout: [['tall', -9, -9], ['tall', -9, 9], ['cake', -12, 0], ['wall', -5, -3, 0.6], ['wall', -5, 3, -0.6], ['can', -14, -16], ['can', -14, 16],
+      ['tri', -6, -18], ['tri', -6, 18, 1], ['minican', -2, -11], ['minican', -2, 11],
+      ['snake', -36, -25], ['snake', -36, 25], ['snake', -18, -27], ['tall', -27, -24], ['tall', -27, 24], ['can', -10, -26], ['can', -10, 26], ['tri', -45, -26],
+      ['tall', 0, 0, 0.78], ['cake', 0, -21], ['cake', 0, 21]],
+    ctf: [['cake', -40, -8], ['cake', -40, 8], ['tall', -44, -14], ['tall', -44, 14], ['wall', -34, -3, PI / 2], ['wall', -34, 3, PI / 2],
+      ['can', -28, -10], ['can', -28, 10], ['tri', -24, 0], ['minican', -32, -17], ['minican', -32, 17]],
+    kothBase: [['cake', -38, -7], ['cake', -38, 7], ['tall', -32, -14], ['tall', -32, 14], ['wall', -28, 0, PI / 2], ['can', -24, -8], ['can', -24, 8]] },
+);
 export const mapById = (id) => MAPS.find((m) => m.id === id) || MAPS[0];
+/** Maps that can host a game mode: the 10 small fields for Elimination, the 3 large ones for CTF and King of the Castle. */
+export const mapsFor = (mode) => MAPS.filter((m) => (mode === 'elim' ? !m.large : m.large));

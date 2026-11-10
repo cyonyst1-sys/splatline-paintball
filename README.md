@@ -45,6 +45,26 @@ Spend them on the **Upgrade marker** screen:
 
 Progress is saved in your browser (localStorage), so it stays on this device and browser.
 
+## Game modes
+
+Pick a mode on the home screen (the host picks it in multiplayer).
+
+| Mode | Teams | Fields | Rules |
+| --- | --- | --- | --- |
+| Elimination | 4 v 4 | the 10 small maps | One hit and you're out. First team to win 3 rounds. |
+| Capture the Flag | 6 v 6 | the 3 large maps | Infinite respawns (6 s, with spawn protection). Grab the enemy flag and bring it to your own flag stand while your flag is home. A carrier who's tagged drops it; touch your own dropped flag to send it home (it also returns by itself after 20 s). First to 3 captures, or the most after 6 minutes. |
+| King of the Castle | 6 v 6 | the 3 large maps | Attackers respawn forever; defenders start inside the castle with 3 lives each. Attackers win by holding the throne room on the keep's ground floor for 30 s (faster with up to 3 attackers inside, paused while a defender is in the room), or by using up every defender life. Defenders win if the 4-minute clock runs out. Two rounds with teams swapping; a 1–1 tie goes to the faster capture. |
+
+### The castle
+
+The castle in King of the Castle is about 31 × 39 m and has real height you can climb:
+
+- Outer curtain walls with battlements, a main gate and two side gates, and corner towers.
+- Wall-walks along the tops of the walls, reached by ramps from the courtyard.
+- A three-level keep (ground floor, 2nd floor, roof) with ramps inside between floors.
+- Arrow slits through every wall at standing eye height, plus crouch-height slits in the parapets (crouch behind the battlements and shoot through them).
+- The throne room, the zone attackers must hold, is on the keep's ground floor.
+
 ## Maps
 
 Pick a map with the arrows on the home screen (or **🎲 Random**). In multiplayer the host picks it in the lobby. Every map has its own bunker style, layout, ground, sky and lighting, and both halves are mirrored so neither team has an advantage.
@@ -62,7 +82,15 @@ Pick a map with the arrows on the home screen (or **🎲 Random**). In multiplay
 | Frostbite | Snow brick walls, ice blocks, snowmen, an igloo | Snowfield |
 | Scrapyard | Pallet stacks, rusty containers, culvert pipes, junk piles | Dusk |
 
-Each field is 50 × 30 m with netting, team tents, flags, bleachers and scenery that matches the map. Paint splats stick to bunkers, the ground and tagged players.
+Large maps (100 × 60 m) for Capture the Flag and King of the Castle:
+
+| Map | Bunker style | Castle |
+| --- | --- | --- |
+| Highland Keep | Woodsball (plank walls, logs, stumps) | Grey stone |
+| Sandstone Citadel | Desert ruins (adobe, columns, boulders) | Sandstone |
+| Frostgate | Snow walls, ice blocks, snowmen | Snow |
+
+Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleachers and scenery that matches the map. Paint splats stick to bunkers, the ground and tagged players.
 
 ## Code
 

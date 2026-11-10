@@ -133,6 +133,18 @@
   .pop small { font-size:12px; letter-spacing:.14em; color:#fff; }
   @keyframes pop { 0% { transform:translateY(10px) scale(.7); opacity:0; } 15% { transform:none; opacity:1; } 100% { transform:translateY(-60px); opacity:0; } }
 
+  /* game modes */
+  .seg.modes button { font-size:13px; padding:8px 4px; line-height:1.15; }
+  #objective { position:absolute; top:70px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center;
+    max-width:min(94vw, 760px); background:var(--glass); border:1px solid var(--line); border-radius:12px; padding:7px 14px; font-size:13px; letter-spacing:.04em; }
+  #objective .capbar { width:120px; height:8px; border-radius:4px; background:rgba(255,255,255,.12); overflow:hidden; display:inline-block; }
+  #objective .capbar i { display:block; height:100%; }
+  #objective .role { color:var(--accent); }
+  #markers { position:absolute; inset:0; overflow:hidden; }
+  .marker { position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; white-space:nowrap; text-shadow:0 1px 3px #000; }
+  .marker i { width:14px; height:14px; transform:rotate(45deg); border:2px solid #fff; box-shadow:0 0 8px rgba(0,0,0,.6); }
+  #banner em { display:block; font-style:normal; font-family:Inter,system-ui,sans-serif; font-weight:800; font-size:.32em; color:#fff; margin-top:4px; letter-spacing:.04em; }
+  #banner .flash { font-size:.6em; }
   /* map picker */
   .mappick { display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.06); border:1px solid var(--line); border-radius:12px; padding:6px; }
   .mappick > div { flex:1; text-align:center; min-width:0; }
@@ -173,13 +185,13 @@
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "./src/main.js": "./src/main.js?v=20261110024643",
-  "./src/world.js": "./src/world.js?v=20261110024643",
-  "./src/maps.js": "./src/maps.js?v=20261110024643",
-  "./src/marker.js": "./src/marker.js?v=20261110024643",
-  "./src/economy.js": "./src/economy.js?v=20261110024643",
-  "./src/audio.js": "./src/audio.js?v=20261110024643",
-  "./src/net.js": "./src/net.js?v=20261110024643"
+  "./src/main.js": "./src/main.js?v=20261110033454",
+  "./src/world.js": "./src/world.js?v=20261110033454",
+  "./src/maps.js": "./src/maps.js?v=20261110033454",
+  "./src/marker.js": "./src/marker.js?v=20261110033454",
+  "./src/economy.js": "./src/economy.js?v=20261110033454",
+  "./src/audio.js": "./src/audio.js?v=20261110033454",
+  "./src/net.js": "./src/net.js?v=20261110033454"
 } }
 </script>
 </head>
@@ -190,6 +202,8 @@
 <div id="hud" class="hidden">
   <div id="coinHud" class="coinpill"><i class="coin"></i><span class="coin-count">0</span></div>
   <div id="topbar"><span class="pips" id="pips0"></span><b class="blue" id="s0">0</b><span id="roundLbl">ROUND 1</span><b class="red" id="s1">0</b><span class="pips" id="pips1"></span></div>
+  <div id="objective" class="hidden"></div>
+  <div id="markers"></div>
   <div id="feed"></div>
   <div id="cross"><i></i><i></i><i></i><i></i></div>
   <div id="hitmark"></div>
@@ -212,6 +226,11 @@
     <div class="seg" id="diff">
       <button data-d="easy">Easy ×0.75</button><button data-d="normal">Normal ×1</button><button data-d="hard">Hard ×1.5</button>
     </div>
+    <div class="label">MODE</div>
+    <div class="seg modes" id="gameMode">
+      <button data-g="elim">Elimination</button><button data-g="ctf">Capture the Flag</button><button data-g="koth">King of the Castle</button>
+    </div>
+    <div class="small" id="modeDesc" style="margin-top:-4px"></div>
     <div class="label">MAP</div>
     <div class="mappick" id="mapPick">
       <button class="arrow" data-d="-1" aria-label="Previous map">◀</button>
@@ -274,6 +293,10 @@
       <button class="btn" id="btnCopy" style="width:auto">🔗 Copy invite link</button>
     </div>
     <div class="seg" id="lobbyMode"><button data-m="teams">Teams</button><button data-m="coop">Co-op vs bots</button></div>
+    <div class="seg modes" id="lobbyGame" style="margin-top:10px">
+      <button data-g="elim">Elimination</button><button data-g="ctf">Capture the Flag</button><button data-g="koth">King of the Castle</button>
+    </div>
+    <p class="small" id="lobbyGameDesc" style="margin-top:6px"></p>
     <div class="mappick" id="lobbyMapPick" style="margin-top:10px">
       <button class="arrow" data-d="-1" aria-label="Previous map">◀</button>
       <div><b id="lobbyMapName"></b><small id="lobbyMapDesc"></small></div>
@@ -309,7 +332,9 @@
 <div id="help" class="screen dim hidden">
   <div class="panel help">
     <h2>How to play</h2>
-    <p>You're on <b class="blue">Blue</b> with three bot teammates against four <b class="red">Red</b> bots. One paintball hit and you're out for the round. First team to win 3 rounds takes the match.</p>
+    <p><b>Elimination</b> (4 v 4, small fields): one paintball hit and you're out for the round. First team to win 3 rounds takes the match.</p>
+    <p><b>Capture the Flag</b> (6 v 6, large fields): infinite respawns. Grab the enemy flag and bring it to your own flag stand while your flag is home. Get tagged carrying it and it drops; touch your own dropped flag to send it home (it also returns by itself after 20 s). First to 3 captures, or the most after 6 minutes.</p>
+    <p><b>King of the Castle</b> (6 v 6, large fields): attackers respawn forever; defenders start inside the castle with 3 lives each. Attackers win by holding the throne room on the keep's ground floor (or knocking out every defender life); defenders win if the 4-minute clock runs out. Two rounds, teams swap. The castle has wall-walks, a three-level keep with ramps, and arrow slits you can shoot through (crouch-height slits in the parapets too).</p>
     <table>
       <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move</td></tr>
       <tr><td>Mouse</td><td>Look and aim</td></tr>
@@ -354,6 +379,6 @@
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
 <!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
-<script type="module" src="src/main.js?v=20261110024643"></script>
+<script type="module" src="src/main.js?v=20261110033454"></script>
 </body>
 </html>
