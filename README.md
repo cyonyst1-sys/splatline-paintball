@@ -129,7 +129,7 @@ In Elimination each bot has a role:
 | Back | Stays deep, creeps forward slowly, holds each bunker for a long time and ropes paint at the bunkers enemies were last seen behind |
 | Mid | Plays the middle of the field with medium bounds and some suppressing fire |
 | Front | Pushes up fast with long bounds and dives into bunkers |
-| Snake | Runs to the snake on its half, dives in behind it, crawls up it, then shoots from the far end (lying flat, rising to a crouch). Leaves if it's flanked. On fields without a snake it plays front |
+| Snake | Runs to the snake on its half, dives in behind it, crawls up it, then shoots from the far end (lying flat, rising to a crouch). Leaves if it's flanked; stays in the snake through role changes while its team has 2+ players |
 | Anchor | Defensive: falls back toward its own base and holds deep cover |
 
 Roles are reassigned whenever someone is tagged, based on the numbers: even teams play back/snake/mid/front; a team down a player plays back and mids; up by 2 or more it pushes with front players; down by 2 or more (or alone against several) it anchors and makes the other team come to it. After 40 s nobody turtles, and after 60 s everyone pushes.

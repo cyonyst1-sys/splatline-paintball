@@ -791,6 +791,12 @@ function assignRoles(team) {
   const bots = mine.filter((p) => p.ctrl === 'bot');
   const hasSnake = !!ownSnake(team);
   roles = roles.map((r) => (r === 'snake' && !hasSnake ? 'front' : r));
+  // someone already down in the snake stays there (it's a commitment), as long as the team isn't turtling
+  const inSnake = bots.find((b) => b.erole === 'snake' && b.sn && b.sn.st !== 'go');
+  if (inSnake && !roles.includes('snake') && n >= 2 && plan !== 'defend' && roles.length) {
+    const k = ['front', 'mid', 'anchor'].map((r) => roles.indexOf(r)).find((i) => i >= 0);
+    roles[k ?? roles.length - 1] = 'snake';
+  }
   // keep roles that still exist (no pointless reshuffles), then hand out the rest by how far up each bot is
   const pending = [];
   for (const b of bots) {
@@ -847,7 +853,8 @@ function snakeRole(b, dt, D, foes) {
     // still well off the snake line (pushed off by something)? walk to the entry first
     const offLine = Math.abs((b.x - sn.entry.x) * sn.back.z - (b.z - sn.entry.z) * sn.back.x);
     if (offLine > 1.6) { b.crawl = false; steer(b, sn.entry.x, sn.entry.z, D.speed, dt); return; }
-    if (!b.tgt) { steer(b, sn.far.x, sn.far.z, 1.35, dt); b.ang += angDiff(fwd, b.ang) * Math.min(1, dt * 5); } // crawl; stop to shoot
+    steer(b, sn.far.x, sn.far.z, b.tgt ? 0.8 : 1.8, dt);                       // crawl (inching while shooting)
+    if (!b.tgt) b.ang += angDiff(fwd, b.ang) * Math.min(1, dt * 5);
     return;
   }
   // holding the end of the snake: lie flat, come up to a crouch to shoot down the line
