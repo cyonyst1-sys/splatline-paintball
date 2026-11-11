@@ -120,7 +120,19 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 - `src/net.js`: peer-to-peer rooms (host, join, messages)
 - `src/marker.js`: the procedural paintball markers (Tourney, Autococker with cycling back block, pump, milsim) and hoppers
 
-Bots fight from cover: they sprint from bunker to bunker toward the enemy (or the objective), picking bunkers that hide them from the nearest threat and that teammates aren't already using. At each bunker they duck, then peek out to shoot (leaning round tall bunkers, standing up over low ones), and move up again after a few seconds, sooner if nobody is in sight. If they're flanked, they relocate. After 40 s in Elimination they push in harder.
+Bots fight from cover: they sprint from bunker to bunker toward the enemy (or the objective), picking bunkers that hide them from the nearest threat and that teammates aren't already using. At each bunker they duck, then peek out to shoot (leaning round tall bunkers, standing up over low ones), and move up again after a few seconds, sooner if nobody is in sight. If they're flanked, they relocate.
+
+In Elimination each bot has a role:
+
+| Role | What it does |
+| --- | --- |
+| Back | Stays deep, creeps forward slowly, holds each bunker for a long time and ropes paint at the bunkers enemies were last seen behind |
+| Mid | Plays the middle of the field with medium bounds and some suppressing fire |
+| Front | Pushes up fast with long bounds and dives into bunkers |
+| Snake | Runs to the snake on its half, dives in behind it, crawls up it, then shoots from the far end (lying flat, rising to a crouch). Leaves if it's flanked. On fields without a snake it plays front |
+| Anchor | Defensive: falls back toward its own base and holds deep cover |
+
+Roles are reassigned whenever someone is tagged, based on the numbers: even teams play back/snake/mid/front; a team down a player plays back and mids; up by 2 or more it pushes with front players; down by 2 or more (or alone against several) it anchors and makes the other team come to it. After 40 s nobody turtles, and after 60 s everyone pushes.
 
 Players are jointed procedural models (hips, knees, ankles, spine, head, and arms posed with two-bone IK onto the marker's grips) with a walk/run cycle, a real crouch, dive, lean, breathing and a hands-up pose when tagged. All models are generated in code; nothing is downloaded.
 

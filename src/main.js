@@ -350,11 +350,13 @@ function freshLife(p) {
   p.alive = true; p.crouch = false; p.ammo = p.mag; p.reload = 0; p.cd = 0;
   p.vx = p.vz = p.mvx = p.mvz = 0; p.tx = undefined;
   p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z; p.path = null; p.flankDone = false; p.cv = null; p.cvLean = 0;
+  p.crawl = false; p.erole = null; p.sn = null; p.snakeDone = false; p.lastSeen = null;
   p.lane = [-1, -0.45, 0, 0.45, 1][(Math.random() * 5) | 0];
   p.hold = Math.random() < 0.5; p.avoid = Math.random() < 0.5 ? 1 : -1;
   reviveModel(p);
 }
 function resetPlayers() {
+  roleT = 0;
   world.clearSplats();
   for (const b of balls) freeBall(b);
   balls = [];
@@ -514,7 +516,7 @@ function eliminate(p, by, point, rs) {
   } else if (!local) p.respawnT = rs || 0;
   if (net.mode === 'host') broadcast({ t: 'tag', v: slotIdx(p), b: slotIdx(by), pt: vec(point), rs: p.respawnT });
   if (local && flagsSt) for (const F of flagsSt) if (F.st === 1 && F.carrier === slotIdx(p)) dropFlag(F, p);
-  p.alive = false; p.reload = 0; p.crouch = false; p.lean = 0; p.diveT = 0;
+  p.alive = false; p.reload = 0; p.crouch = false; p.lean = 0; p.diveT = 0; p.crawl = false; roleT = 0;
   const n = new THREE.Vector3(point.x - p.x, 0, point.z - p.z).normalize();
   const d = world.addSplat(point, n, by.team, 0.42, p.model.root); if (d) d.userData.decal = true;
   world.puff(point, by.team);
@@ -660,10 +662,11 @@ function coverAdvance(b, dt, D, target, foes, o) {
   const threat = b.tgt || nearestFoe(b, foes);
   cv.quiet = b.tgt ? 0 : (cv.quiet || 0) + dt;
   // nobody in sight for a while: don't sit around, keep moving up
-  cv.t -= cv.mode === 'cover' && cv.quiet > 1.5 ? dt * (gameMode === 'koth' ? 20 : 3) : dt;
+  // (patient players, like a back player or an anchor, sit tight anyway)
+  cv.t -= cv.mode === 'cover' && cv.quiet > 1.5 && !o.patient ? dt * (gameMode === 'koth' ? 20 : 3) : dt;
   if (cv.mode === 'pick') {
     cv.spot = o.fixed ? { x: o.fixed.x, z: o.fixed.z } : pickCover(b, target, threat, o, false) || (o.push ? null : pickCover(b, target, threat, o, true));
-    cv.open = false;
+    cv.open = false; cv.willDive = Math.random() < (o.dive || 0);
     if (!cv.spot && !o.push) { cv.spot = { x: b.x, z: b.z }; cv.open = true; } // nowhere better: stay and fight from here
     cv.mode = 'move'; cv.t = 7; b.stuckT = 0; b.lx = b.x; b.lz = b.z;
   }
@@ -673,8 +676,12 @@ function coverAdvance(b, dt, D, target, foes, o) {
       if (!cv.spot) { cv.mode = 'pick'; return; }
       cv.mode = 'cover'; cv.t = rand(o.hold[0], o.hold[1]); cv.peek = false; cv.peekT = rand(0.2, 0.6); cv.check = 0; cv.lowOk = cv.highOk = true;
     } else {
+      // the last couple of metres into a bunker: dive in (front players mostly)
+      if (cv.willDive && cv.spot && d < 3.2 && d > 1.8 && (b.y || 0) < 0.3 && b.diveCd <= 0 && b.reload <= 0) {
+        cv.willDive = false; botDive(b, Math.atan2(goal.z - b.z, goal.x - b.x)); return;
+      }
       // sprint between bunkers; shoot on the run if someone's in view
-      const a = followPath(b, goal, D.speed * (b.tgt ? 0.95 : 1.1), dt);
+      const a = followPath(b, goal, D.speed * (b.tgt ? 0.95 : 1.1) * (o.fast || 1), dt);
       if (!b.tgt) b.ang += angDiff(d < 2.5 && threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : a, b.ang) * Math.min(1, dt * 6);
       b.stuckT += dt;
       if (b.stuckT > 0.9) {
@@ -716,21 +723,149 @@ function coverAdvance(b, dt, D, target, foes, o) {
       else { cv.peek = false; cv.peekT = rand(0.6, 1.5); }
     } else {
       cv.peek = true; cv.peekT = cv.peekLen = rand(0.8, 1.6);
+      cv.supp = Math.random() < (o.suppress || 0); // lay down paint on their last spot even if they're hiding
+      cv.low = false;
       if (!cv.highOk) cv.side = 0; // low bunker: pop up over the top
-      else {                       // tall bunker: lean out the side that has a view of them
+      else {                       // tall bunker: lean out the side that has a view, often from a crouch
         const sides = Math.random() < 0.5 ? [1, -1] : [-1, 1];
-        cv.side = sides[0];
+        cv.side = sides[0]; cv.low = Math.random() < 0.45;
         if (threat) for (const s of sides) {
           const e = leanEye(b, s, ta);
-          if (losClear(e.x, (b.y || 0) + H_STAND * 0.9 - 0.05, e.z, threat.x, chestY(threat), threat.z)) { cv.side = s; break; }
+          if (losClear(e.x, (b.y || 0) + (cv.low ? H_CROUCH : H_STAND) * 0.9 - 0.05, e.z, threat.x, chestY(threat), threat.z)) { cv.side = s; break; }
         }
       }
     }
   }
   b.cvLean = cv.peek ? cv.side : 0;
-  b.cvCrouch = !cv.peek && !cv.highOk;
+  b.cvCrouch = cv.peek ? cv.low : !cv.highOk;
   // time to move up (only once ducked back in)
   if (cv.t <= 0 && !cv.peek && !o.fixed) cv.mode = 'pick';
+}
+// ---- Elimination roles ----
+// back:   stays deep, creeps forward slowly, holds long and lays ropes of paint on the enemy's bunkers
+// mid:    plays the middle of the field, medium bounds, some suppressing fire
+// front:  pushes up fast with long bounds, dives into bunkers, gets close
+// snake:  runs to the snake, dives in, crawls up it and shoots from the end
+// anchor: (defending when down on numbers) falls back to deep cover and makes them come to you
+const ROLE = {
+  back:   { hold: [3.5, 6], step: 7, keepAway: 20, suppress: 0.9, rope: 0.5, dive: 0, fast: 0.8, patient: true },
+  mid:    { hold: [2, 4], step: 10, keepAway: 12, suppress: 0.45, rope: 0.75, dive: 0.3 },
+  front:  { hold: [0.8, 2], step: 14, keepAway: 3, push: true, suppress: 0.2, rope: 1, dive: 0.75, fast: 1.12 },
+  anchor: { hold: [6, 10], step: 7, keepAway: 22, suppress: 0.6, rope: 0.7, dive: 0.15, retreat: true, patient: true },
+  snake:  { suppress: 0.3, rope: 0.9 },
+};
+const ROLE_RANK = { front: 0, snake: 1, mid: 2, anchor: 3, back: 4 }; // most advanced bot gets the most forward role
+const teamPlan = ['even', 'even'];
+let roleT = 0;
+// the snake on a team's own half (closest to its base), if this field has one
+function ownSnake(team) {
+  const side = team ? 1 : -1;
+  let best = null, bd = 1e9;
+  for (const s of world.info.snakes || []) {
+    if (s.x * side < -4) continue;
+    const d = Math.abs(s.x - side * FIELD.hw) + Math.random() * 0.5;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+// What a team does depends on the numbers: up by 2+ → push, down by 2+ (or alone against several) → defend.
+function assignRoles(team) {
+  const mine = players.filter((p) => p.team === team && p.alive), n = mine.length;
+  const m = players.filter((p) => p.team !== team && p.alive).length;
+  if (!n) return;
+  const late = roundTime > HUNT_AFTER + 20;       // a long stalemate: everybody goes
+  let plan = n - m >= 2 ? 'push' : m - n >= 2 || (n === 1 && m >= 2) ? 'defend' : m > n ? 'behind' : 'even';
+  if (late) plan = 'push';
+  else if (plan === 'defend' && roundTime > HUNT_AFTER) plan = 'behind'; // can't turtle forever
+  const sets = {
+    even:   [['mid'], ['mid', 'front'], ['back', 'mid', 'front'], ['back', 'snake', 'mid', 'front']],
+    behind: [['mid'], ['back', 'mid'], ['back', 'mid', 'mid'], ['back', 'snake', 'mid', 'mid']],
+    push:   [['front'], ['mid', 'front'], ['mid', 'front', 'front'], ['back', 'snake', 'front', 'front']],
+    defend: [['anchor'], ['back', 'anchor'], ['back', 'anchor', 'anchor'], ['back', 'anchor', 'anchor', 'mid']],
+  };
+  let roles = sets[plan][Math.min(n, 4) - 1].slice();
+  while (roles.length < n) roles.push(plan === 'push' ? 'front' : 'mid');
+  if (late) roles = roles.map((r) => (r === 'back' ? 'mid' : r === 'snake' ? 'snake' : 'front'));
+  // a human on the team takes one of the slots (a mid if there is one)
+  if (mine.some((p) => !(p.ctrl === 'bot'))) { const k = roles.indexOf('mid'); roles.splice(k >= 0 ? k : roles.length - 1, 1); }
+  const bots = mine.filter((p) => p.ctrl === 'bot');
+  const hasSnake = !!ownSnake(team);
+  roles = roles.map((r) => (r === 'snake' && !hasSnake ? 'front' : r));
+  // keep roles that still exist (no pointless reshuffles), then hand out the rest by how far up each bot is
+  const pending = [];
+  for (const b of bots) {
+    const k = b.erole && !(b.erole === 'snake' && b.snakeDone) ? roles.indexOf(b.erole) : -1;
+    if (k >= 0) roles.splice(k, 1); else pending.push(b);
+  }
+  const side = team ? 1 : -1;
+  pending.sort((a, b2) => a.x * side - b2.x * side);        // most advanced first
+  roles.sort((a, b2) => ROLE_RANK[a] - ROLE_RANK[b2]);
+  for (const b of pending) {
+    let r = roles.shift() || 'mid';
+    if (r === 'snake' && b.snakeDone) r = 'front';
+    if (b.erole !== r) { b.erole = r; b.cv = null; b.sn = null; b.crawl = false; }
+  }
+  teamPlan[team] = plan;
+}
+function botDive(b, dir) { b.diveT = DIVE_T; b.diveDir = dir; b.crawl = false; b.crouch = false; }
+// snake player: go to the back end of your snake, dive in behind it, crawl up to the far end, play from there
+function snakeRole(b, dt, D, foes) {
+  let sn = b.sn;
+  if (!sn) {
+    const s = ownSnake(b.team);
+    if (!s) { b.erole = 'front'; return; }
+    const u = { x: Math.cos(s.rot), z: -Math.sin(s.rot) }, n = { x: Math.sin(s.rot), z: Math.cos(s.rot) };
+    const sd = Math.sign(n.z * s.z + n.x * 0.001) || 1;       // the outside of the snake, away from the middle
+    const off = s.hd + 0.42, side = b.team ? 1 : -1;
+    const ends = [1, -1].map((k) => ({ x: s.x + u.x * k * (s.hw - 0.3) + n.x * sd * off, z: s.z + u.z * k * (s.hw - 0.3) + n.z * sd * off }));
+    ends.sort((a, c) => c.x * side - a.x * side);            // [entry (own end), far end]
+    const [entry, far] = ends, L = Math.hypot(entry.x - far.x, entry.z - far.z);
+    const back = { x: (entry.x - far.x) / L, z: (entry.z - far.z) / L };
+    sn = b.sn = { entry, far, back, approach: { x: entry.x + back.x * 3, z: entry.z + back.z * 3 }, st: 'go', t: 14 };
+    b.cv = { mode: 'move', peek: false };
+  }
+  sn.t -= dt;
+  const cv = b.cv, fwd = Math.atan2(-sn.back.z, -sn.back.x);
+  const threat = b.tgt || nearestFoe(b, foes);
+  if (sn.st === 'go') {
+    b.crawl = false;
+    const d = Math.hypot(sn.approach.x - b.x, sn.approach.z - b.z);
+    if (d < 0.7 || sn.t <= 0) {
+      // dive in along the snake; if the run-up is blocked just get down at the entry
+      if (sn.t > 0 && b.diveCd <= 0) botDive(b, Math.atan2(sn.entry.z - b.z, sn.entry.x - b.x));
+      sn.st = 'crawl'; sn.t = 30;
+    } else {
+      const a = followPath(b, sn.approach, D.speed * 1.1, dt);
+      if (!b.tgt) b.ang += angDiff(a, b.ang) * Math.min(1, dt * 6);
+    }
+    return;
+  }
+  if (sn.st === 'crawl') {
+    b.crawl = true; cv.mode = 'move'; cv.peek = false;
+    const d = Math.hypot(sn.far.x - b.x, sn.far.z - b.z);
+    if (d < 0.6 || sn.t <= 0) { sn.st = 'hold'; sn.t = rand(7, 12); cv.mode = 'cover'; cv.peekT = rand(0.5, 1); return; }
+    // still well off the snake line (pushed off by something)? walk to the entry first
+    const offLine = Math.abs((b.x - sn.entry.x) * sn.back.z - (b.z - sn.entry.z) * sn.back.x);
+    if (offLine > 1.6) { b.crawl = false; steer(b, sn.entry.x, sn.entry.z, D.speed, dt); return; }
+    if (!b.tgt) { steer(b, sn.far.x, sn.far.z, 1.35, dt); b.ang += angDiff(fwd, b.ang) * Math.min(1, dt * 5); } // crawl; stop to shoot
+    return;
+  }
+  // holding the end of the snake: lie flat, come up to a crouch to shoot down the line
+  cv.mode = 'cover';
+  if (!b.tgt) b.ang += angDiff(threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : fwd, b.ang) * Math.min(1, dt * 4);
+  cv.peekT -= dt;
+  if (b.reload > 0) cv.peek = false;
+  else if (cv.peekT <= 0) {
+    if (cv.peek && !(b.tgt && b.ammo > 0 && cv.peekLen < 3)) { cv.peek = false; cv.peekT = rand(0.8, 1.6); }
+    else if (cv.peek) { cv.peekT = 0.3; cv.peekLen += 0.3; }
+    else { cv.peek = true; cv.peekT = cv.peekLen = rand(1, 1.8); cv.supp = Math.random() < ROLE.snake.suppress; }
+  }
+  b.crawl = !cv.peek; b.cvCrouch = cv.peek;
+  // flanked (seen from the middle while down), or played it out: get up and become a front player
+  // (only fire from the side counts: down the line is where a snake player expects it)
+  const side = threat && Math.abs(((threat.x - b.x) * -sn.back.x + (threat.z - b.z) * -sn.back.z) / Math.max(0.1, dist(b, threat))) < 0.7;
+  const exposed = side && dist(b, threat) < 22 && !cv.peek && losClear(threat.x, eyeY(threat), threat.z, b.x, 0.45, b.z);
+  if (sn.t <= 0 || exposed) { b.snakeDone = true; b.erole = 'front'; b.sn = null; b.cv = null; b.crawl = false; }
 }
 function steer(b, tx, tz, speed, dt, careful = true) {
   let a = Math.atan2(tz - b.z, tx - b.x);
@@ -796,6 +931,18 @@ function updateBot(b, dt) {
   const D = DIFF[matchDiff];
   const foes = players.filter((p) => p.alive && p.team !== b.team && p.protect <= 0);
   const obj = respawnMode() ? objectiveFor(b) : null;
+  const R = gameMode === 'elim' ? ROLE[b.erole || 'mid'] : null;
+  // mid-dive: the slide carries them; nothing else until they land
+  b.diveCd -= dt;
+  if (b.diveT > 0) {
+    const t = DIVE_T - b.diveT;
+    b.diveT -= dt;
+    const sp = t < 0.35 ? 8.6 - t * 12 : Math.max(0, 4.4 - (t - 0.35) * 11);
+    move(b, Math.cos(b.diveDir) * sp * dt, Math.sin(b.diveDir) * sp * dt, true);
+    b.lean *= 0.8; b.crouch = false;
+    if (b.diveT <= 0) { b.diveT = 0; b.diveCd = 1.5; }
+    return;
+  }
   const me = leanOffset(b);
   b.scanT -= dt;
   if (b.tgt && (!b.tgt.alive || b.tgt.protect > 0)) b.tgt = null;
@@ -820,6 +967,7 @@ function updateBot(b, dt) {
   if (b.tgt) {
     const t = b.tgt, td = Math.hypot(t.x - b.x, t.z - b.z);
     b.seen += dt;
+    b.lastSeen = { x: t.x, z: t.z, y: chestY(t), t: clock };
     const ft = td / b.ballSpeed;
     const tl = leanOffset(t, 0.8);
     const px = t.x + tl.x + t.vx * ft * D.lead, pz = t.z + tl.z + t.vz * ft * D.lead;
@@ -838,13 +986,37 @@ function updateBot(b, dt) {
       const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
       const pos = new THREE.Vector3(b.x + me.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + me.z + Math.sin(b.ang) * 0.55);
       fire(b, pos, dir.multiplyScalar(b.ballSpeed));
-      b.cd = D.rate * rand(0.8, 1.4);
+      b.cd = D.rate * rand(0.8, 1.4) * (R ? R.rope : 1); // back players rope it: a steady stream of paint
     }
-  } else { b.seen = 0; b.pitch *= 0.9; }
+  } else {
+    b.seen = 0; b.pitch *= 0.9;
+    if (R && b.cv && b.cv.peek && b.cv.supp) suppress(b, D, R, me, dt);
+  }
 
   botMove(b, dt, D, obj, foes, want);
-  b.crouch = b.reload > 0 || hunker || b.cvCrouch;
+  b.crouch = !b.crawl && (b.reload > 0 || hunker || b.cvCrouch);
+  if (b.crawl) b.cvLean = 0;
   b.lean += (b.cvLean - b.lean) * Math.min(1, dt * 8);
+}
+// Suppressing fire: no one in view, but someone was just there. Walk a rope of paint back and forth across the
+// edge of the bunker they ducked behind, so anyone who pokes out runs into it.
+function suppress(b, D, R, me, dt) {
+  const L = b.lastSeen;
+  if (!L || clock - L.t > 5 || b.reload > 0 || b.ammo <= 3) return;
+  const dx = L.x - b.x, dz = L.z - b.z, d = Math.hypot(dx, dz);
+  if (d < 4 || d > D.sight) return;
+  const sweep = Math.sin(clock * 2.6 + b.i * 1.7) * 0.8;
+  const px = L.x - (dz / d) * sweep, pz = L.z + (dx / d) * sweep;
+  const want = Math.atan2(pz - b.z, px - b.x), da = angDiff(want, b.ang);
+  b.ang += da * Math.min(1, dt * 9);
+  if (b.cd > 0 || Math.abs(da) > 0.25) return;
+  const muzzleY = eyeY(b) - 0.25, ft = d / b.ballSpeed;
+  const pitch = Math.atan2(L.y + 0.5 * GRAV * ft * ft - muzzleY, d) + gauss() * D.err * 0.6;
+  const yaw = b.ang + gauss() * D.err;
+  const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
+  const pos = new THREE.Vector3(b.x + me.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + me.z + Math.sin(b.ang) * 0.55);
+  fire(b, pos, dir.multiplyScalar(b.ballSpeed));
+  b.cd = D.rate * R.rope * rand(0.85, 1.15);
 }
 function botMove(b, dt, D, obj, foes, want) {
   if (obj) {
@@ -856,13 +1028,18 @@ function botMove(b, dt, D, obj, foes, want) {
       // (castle attackers only cross the open field this way; inside the walls they storm the keep)
       if (!obj.hold && dist(b, obj) > 8 && (gameMode === 'ctf' || !obj.rush)) return coverAdvance(b, dt, D, obj, foes, { hold: obj.rush || gameMode === 'koth' ? [0.4, 1.2] : [1, 2.4], step: 14, push: true });
     }
-    b.cv = null;
+    b.cv = null; b.crawl = false;
     return objectiveMove(b, dt, D, obj, want);
   }
   if (!foes.length) return;
-  // Elimination: work up the field toward the nearest opponent; after a while, push in harder
-  const hunt = roundTime > HUNT_AFTER;
-  coverAdvance(b, dt, D, nearestFoe(b, foes), foes, { hold: hunt ? [0.6, 1.5] : [2, 4.5], step: hunt ? 14 : 11, keepAway: hunt ? 0 : 8, push: hunt });
+  // Elimination: play your role (see assignRoles)
+  const role = b.erole || 'mid';
+  if (role === 'snake') return snakeRole(b, dt, D, foes);
+  b.crawl = false;
+  const R = ROLE[role];
+  // anchors fall back toward their own base; everyone else works toward the nearest opponent
+  const target = R.retreat ? { x: (b.team ? 1 : -1) * (FIELD.hw - 5), z: b.z * 0.6 } : nearestFoe(b, foes);
+  coverAdvance(b, dt, D, target, foes, R);
 }
 // close-in objective play: grabbing flags, running them home, taking or defending the throne room
 function objectiveMove(b, dt, D, obj, want) {
@@ -1365,6 +1542,8 @@ function update(dt) {
   }
   if (state === 'playing') {
     roundTime += dt;
+    // Elimination bots re-think their roles twice a second (and right away when someone is tagged)
+    if (gameMode === 'elim' && !client) { roleT -= dt; if (roleT <= 0) { roleT = 0.5; assignRoles(0); assignRoles(1); } }
     for (const p of players) {
       p.protect = Math.max(0, p.protect - dt);
       if (!p.alive) {
@@ -1383,6 +1562,7 @@ function update(dt) {
         const spd = Math.hypot(p.vx, p.vz);
         let target = p.ang;
         if (spd > 0.5) { const md = Math.atan2(p.vz, p.vx); target = Math.abs(angDiff(md, p.ang)) <= Math.PI / 2 ? md : md + Math.PI; }
+        if (p.diveT > 0) target = p.diveDir;                    // dive head-first
         p.bodyAng += angDiff(target, p.bodyAng) * Math.min(1, dt * 8);
         const dd = angDiff(p.ang, p.bodyAng); if (Math.abs(dd) > 1.75) p.bodyAng = p.ang - Math.sign(dd) * 1.75;
       }
@@ -1407,7 +1587,7 @@ function update(dt) {
   } else if (state === 'playing' && client && gameMode !== 'elim') timeLeft -= dt;
   for (const p of players) {
     if (p.ctrl === 'remote' || p.ctrl === 'net') continue;
-    const target = p.diveT > 0 ? H_PRONE : p.crouch ? H_CROUCH : H_STAND;
+    const target = p.diveT > 0 || p.crawl ? H_PRONE : p.crouch ? H_CROUCH : H_STAND;
     p.h += (target - p.h) * Math.min(1, dt * (p.diveT > 0 ? 16 : 10));
   }
   netTick(dt);

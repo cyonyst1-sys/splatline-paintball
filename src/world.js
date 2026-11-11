@@ -443,7 +443,7 @@ export function createWorld(canvas, high) {
     t: (K) => new THREE.CylinderGeometry(K.R, K.R, K.h, 3).rotateY(Math.PI / 2).translate(0, K.h / 2, 0),
   };
   let groundTex = [];
-  const info = { map: null, mode: 'elim', flags: null, castle: null, large: false };
+  const info = { map: null, mode: 'elim', flags: null, castle: null, large: false, snakes: [] };
 
   function applyTheme(th) {
     for (const t of groundTex) t.dispose();
@@ -490,6 +490,7 @@ export function createWorld(canvas, high) {
     finishGroup(g);
     bunkerMeshes.push(...colliders);
     shapes.push(K.t === 'b' ? { t: 'b', x, z, rot, hw: K.w / 2, hd: K.d / 2, y0: 0, y1: K.h } : { t: 'c', x, z, rot, r: K.r, y0: 0, y1: K.h });
+    if (kind === 'snake') info.snakes.push({ x, z, rot, hw: K.w / 2, hd: K.d / 2 }); // the AI's snake players crawl along these
   }
   function placeCastle(castle, cx, style) {
     const plan = castlePlan();
@@ -547,7 +548,7 @@ export function createWorld(canvas, high) {
   function loadMap(id, mode = 'elim') {
     const map = mapById(id);
     clearSplats();
-    clearArena();
+    clearArena(); info.snakes = [];
     setSize(map.size || SMALL);
     applyTheme(map.theme);
     const place = (list, mirror) => {
