@@ -1,9 +1,9 @@
 // Game loop, players, bots, game modes, shooting, menus and HUD.
 import * as THREE from 'three';
 import { createWorld, TEAMS, NETB, FIELD, resolveCircle, segBlocked2D, segCircle, supportHeight } from './world.js';
-import { save, persist, resetSave, UPGRADES, stat, costOf, buy, addCoins } from './economy.js';
+import { save, persist, resetSave, UPGRADES, stat, costOf, buy, addCoins, ITEMS, owns, buyItem, equipItem, myLook } from './economy.js';
 import { sfx, initAudio, setListener, setVolume } from './audio.js';
-import { makeMarker, disposeMarker } from './marker.js';
+import { makeMarker, disposeMarker, cycleMarker, animateMarker } from './marker.js';
 import { mapById, mapsFor } from './maps.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
@@ -44,58 +44,229 @@ const CTF = { caps: 3, time: 360, returnT: 20, pickR: 1.4, capR: 2.6 };
 const KOTH = { time: 240, lives: 5, capSecs: 55, rounds: 2, attackRespawn: 9, defendRespawn: 3 };
 const RESPAWN_T = 4, PROTECT_T = 2.5;
 
-// ---------- models ----------
+// ---------- characters ----------
+// A jointed player: pelvis → legs (hip, knee, foot) and spine → chest, head, and an "aim" group that holds
+// the marker and both arms. Arms are posed with two-bone IK so the hands sit on the marker's grips.
+// Local axes: +x forward, +y up, +z to the right.
+const LIMB = { thigh: 0.43, shin: 0.43, upper: 0.29, fore: 0.27, hip: 0.92 };
 const G = {
-  leg: new THREE.CapsuleGeometry(0.1, 0.6, 4, 8),
-  torso: new THREE.CapsuleGeometry(0.23, 0.42, 6, 12),
-  head: new THREE.SphereGeometry(0.15, 16, 12),
-  mask: new THREE.BoxGeometry(0.12, 0.17, 0.27),
-  lens: new THREE.BoxGeometry(0.04, 0.07, 0.24),
-  arm: new THREE.CapsuleGeometry(0.06, 0.36, 4, 8),
+  thigh: new THREE.CapsuleGeometry(0.088, LIMB.thigh - 0.12, 4, 10).translate(0, -LIMB.thigh / 2, 0),
+  shin: new THREE.CapsuleGeometry(0.068, LIMB.shin - 0.09, 4, 10).translate(0, -LIMB.shin / 2, 0),
+  foot: new THREE.BoxGeometry(0.25, 0.08, 0.11).translate(0.05, -0.04, 0),
+  hips: new THREE.CapsuleGeometry(0.125, 0.11, 4, 12).rotateX(Math.PI / 2).scale(0.72, 0.9, 1),
+  torso: new THREE.LatheGeometry([[0.0, 0], [0.15, 0], [0.165, 0.08], [0.19, 0.24], [0.205, 0.37], [0.2, 0.45], [0.13, 0.54], [0, 0.56]].map(([x, y]) => new THREE.Vector2(x, y)), 24),
+  neck: new THREE.CylinderGeometry(0.05, 0.06, 0.1, 10),
+  head: new THREE.SphereGeometry(0.112, 18, 14),
+  // sphere phi = PI and cylinder theta = PI/2 both face +x (forward)
+  maskShell: new THREE.SphereGeometry(0.13, 20, 12, Math.PI - 1.25, 2.5, 1.0, 1.55),
+  lens: new THREE.CylinderGeometry(0.135, 0.135, 0.06, 24, 1, true, Math.PI / 2 - 1.05, 2.1),
+  visor: new THREE.BoxGeometry(0.06, 0.012, 0.2),
+  strap: new THREE.TorusGeometry(0.118, 0.012, 6, 24),
+  upper: new THREE.CapsuleGeometry(0.055, LIMB.upper - 0.08, 4, 10).translate(0, -LIMB.upper / 2, 0),
+  fore: new THREE.CapsuleGeometry(0.047, LIMB.fore - 0.07, 4, 10).translate(0, -LIMB.fore / 2, 0),
+  hand: new THREE.BoxGeometry(0.06, 0.09, 0.05).translate(0, -0.04, 0),
+  belt: new THREE.TorusGeometry(0.16, 0.022, 6, 24).rotateX(Math.PI / 2).scale(0.78, 1, 1),
+  pod: new THREE.CylinderGeometry(0.026, 0.026, 0.17, 10),
+  podCap: new THREE.CylinderGeometry(0.03, 0.03, 0.03, 10),
 };
 const M = {
   skin: new THREE.MeshStandardMaterial({ color: 0xd9a37f, roughness: 0.7 }),
-  pants: new THREE.MeshStandardMaterial({ color: 0x23262d, roughness: 0.85 }),
-  mask: new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.5 }),
-  lens: new THREE.MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.1, metalness: 0.6, emissive: 0x16304a }),
-  jersey: TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.75 })),
+  pants: new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.85 }),
+  shoe: new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.6 }),
+  glove: new THREE.MeshStandardMaterial({ color: 0x18191c, roughness: 0.75 }),
+  belt: new THREE.MeshStandardMaterial({ color: 0x1b1c1f, roughness: 0.6 }),
+  pod: new THREE.MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.3, transparent: true, opacity: 0.85 }),
   out: TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: new THREE.Color(t.color).lerp(new THREE.Color(0x777777), 0.7), roughness: 0.9 })),
+  teamPaint: TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.paint, roughness: 0.3 })),
 };
+const jerseyCache = {}, maskCache = {};
+// jersey texture on the torso lathe: u = 0.25 is the chest, u = 0.75 the back; the top of the canvas is the collar
+function jerseyMat(team, pattern) {
+  const key = `${team}_${pattern}`;
+  if (jerseyCache[key]) return jerseyCache[key];
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'), base = new THREE.Color(TEAMS[team].color), css = (col) => `#${col.getHexString()}`;
+  const dark = base.clone().multiplyScalar(0.55), light = base.clone().lerp(new THREE.Color(0xffffff), 0.45);
+  g.fillStyle = css(base); g.fillRect(0, 0, 256, 256);
+  if (pattern === 'stripes') { g.fillStyle = '#ffffff'; g.fillRect(40, 0, 12, 256); g.fillRect(76, 0, 12, 256); g.fillRect(168, 0, 12, 256); g.fillRect(204, 0, 12, 256); }
+  else if (pattern === 'chevron') {
+    g.strokeStyle = '#ffffff'; g.lineWidth = 12;
+    for (const y of [70, 110, 150]) { g.beginPath(); g.moveTo(14, y - 34); g.lineTo(64, y); g.lineTo(114, y - 34); g.stroke(); }
+  } else if (pattern === 'camo') {
+    for (let i = 0; i < 70; i++) { g.fillStyle = [css(dark), css(light), '#1d2418'][i % 3]; g.beginPath(); g.ellipse(Math.random() * 256, Math.random() * 256, 8 + Math.random() * 22, 6 + Math.random() * 14, Math.random() * 3, 0, 7); g.fill(); }
+  } else if (pattern === 'flame') {
+    for (let i = 0; i < 26; i++) {
+      const x = i * 10 + Math.random() * 6, h = 70 + Math.random() * 90;
+      const gr = g.createLinearGradient(0, 256, 0, 256 - h); gr.addColorStop(0, '#ffd23f'); gr.addColorStop(0.6, '#ff6a00'); gr.addColorStop(1, 'rgba(255,40,0,0)');
+      g.fillStyle = gr; g.beginPath(); g.moveTo(x - 9, 256); g.quadraticCurveTo(x - 12, 256 - h * 0.5, x + 4, 256 - h); g.quadraticCurveTo(x + 2, 256 - h * 0.45, x + 12, 256); g.fill();
+    }
+  } else if (pattern === 'pro') {
+    g.fillStyle = css(dark); g.fillRect(0, 0, 256, 40); g.fillRect(0, 216, 256, 40);
+    g.fillStyle = '#ffffff'; g.fillRect(0, 40, 256, 6);
+    g.font = '900 110px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('7', 192, 130);
+    g.font = '900 34px system-ui, sans-serif'; g.fillText('7', 82, 92);
+  }
+  g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, 0, 256, 10);       // collar
+  g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(0, 246, 256, 10);     // hem
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return (jerseyCache[key] = new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 }));
+}
+const sleeveMat = TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.8 }));
+function maskMats(id) {
+  if (maskCache[id]) return maskCache[id];
+  const it = ITEMS.mask[id] || ITEMS.mask.black;
+  return (maskCache[id] = {
+    shell: new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.4, metalness: it.metal > 0.5 ? 0.8 : 0.1 }),
+    lens: new THREE.MeshStandardMaterial({ color: 0x0b0d10, roughness: 0.08, metalness: it.metal, emissive: it.lens, emissiveIntensity: 0.55, side: THREE.DoubleSide }),
+  });
+}
 function mesh(geo, mat, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; }
-function makeModel(team) {
+
+// two-bone IK: rotations for an upper-arm group at `sh` and its forearm (both pointing down -y) so the hand reaches `tgt`
+const DOWN = new THREE.Vector3(0, -1, 0);
+function solveArm(sh, tgt, L1, L2, pole) {
+  const d = tgt.clone().sub(sh), dist = clamp(d.length(), 0.08, L1 + L2 - 0.002), dn = d.normalize();
+  const a = Math.acos(clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1));
+  const perp = pole.clone().sub(dn.clone().multiplyScalar(pole.dot(dn))).normalize();
+  const u = dn.clone().multiplyScalar(Math.cos(a)).add(perp.multiplyScalar(Math.sin(a))).normalize();
+  const q1 = new THREE.Quaternion().setFromUnitVectors(DOWN, u);
+  const elbow = sh.clone().addScaledVector(u, L1);
+  const f = tgt.clone().sub(elbow).normalize().applyQuaternion(q1.clone().invert());
+  return { q1, q2: new THREE.Quaternion().setFromUnitVectors(DOWN, f) };
+}
+const DEFAULT_LOOK = { marker: 'tourney', hopper: 'agitated', jersey: 'classic', mask: 'black' };
+function makeModel(team, look = DEFAULT_LOOK) {
   const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+  const pelvis = new THREE.Group(); pelvis.position.y = LIMB.hip; body.add(pelvis);
+  pelvis.add(mesh(G.hips, M.pants, 0, 0.02, 0));
+  // pod pack on the back of the belt
+  pelvis.add(mesh(G.belt, M.belt, 0, 0.06, 0));
+  for (let i = 0; i < 4; i++) {
+    const z = -0.09 + i * 0.06;
+    pelvis.add(mesh(G.pod, M.pod, -0.15, 0.04, z)); pelvis.add(mesh(G.podCap, M.teamPaint[team], -0.15, 0.135, z));
+  }
   const legs = [];
   for (const s of [-1, 1]) {
-    const pivot = new THREE.Group(); pivot.position.set(0, 0.82, s * 0.12);
-    pivot.add(mesh(G.leg, M.pants, 0, -0.4, 0)); body.add(pivot); legs.push(pivot);
+    const hip = new THREE.Group(); hip.position.set(0, -0.04, s * 0.095); pelvis.add(hip);
+    hip.add(mesh(G.thigh, M.pants));
+    const knee = new THREE.Group(); knee.position.y = -LIMB.thigh; hip.add(knee);
+    knee.add(mesh(G.shin, M.pants));
+    const ankle = new THREE.Group(); ankle.position.y = -LIMB.shin; knee.add(ankle);
+    ankle.add(mesh(G.foot, M.shoe));
+    legs.push({ hip, knee, ankle });
   }
-  const upper = new THREE.Group(); upper.rotation.order = 'YXZ'; body.add(upper);
-  const torso = mesh(G.torso, M.jersey[team], 0, 1.15, 0); torso.scale.z = 1.12; upper.add(torso);
-  upper.add(mesh(G.head, M.skin, 0, 1.58, 0));
-  upper.add(mesh(G.mask, M.mask, 0.1, 1.56, 0));
-  upper.add(mesh(G.lens, M.lens, 0.165, 1.6, 0));
-  const gun = makeMarker(team, { detail: 'low' }); gun.position.set(0.24, 1.2, 0.13); upper.add(gun);
-  const armR = mesh(G.arm, M.jersey[team], 0.18, 1.22, 0.18); armR.rotation.z = -1.35; upper.add(armR);
-  const armL = mesh(G.arm, M.jersey[team], 0.28, 1.24, -0.06); armL.rotation.set(0.5, 0, -1.4); upper.add(armL);
-  const armUp = mesh(G.arm, M.jersey[team], 0, 1.82, -0.26); armUp.visible = false; upper.add(armUp);
+  // spine: torso, neck, head, and the aim group (yaw from the look direction, x = lean, z = forward lean)
+  const upper = new THREE.Group(); upper.rotation.order = 'YXZ'; upper.position.y = 0.06; pelvis.add(upper);
+  const torso = mesh(G.torso, jerseyMat(team, look.jersey)); torso.scale.set(0.72, 1, 1); upper.add(torso);
+  upper.add(mesh(G.neck, M.skin, 0.01, 0.6, 0));
+  const head = new THREE.Group(); head.position.set(0.01, 0.7, 0); upper.add(head);
+  const mm = maskMats(look.mask);
+  head.add(mesh(G.head, M.skin)).scale.set(1, 1.1, 0.95);
+  const shellM = mesh(G.maskShell, mm.shell); shellM.rotation.y = 0; head.add(shellM);
+  const lens = mesh(G.lens, mm.lens, 0, 0.035, 0); head.add(lens);
+  head.add(mesh(G.visor, mm.shell, 0.11, 0.075, 0));
+  const strap = mesh(G.strap, M.belt, -0.01, 0.035, 0); strap.rotation.x = Math.PI / 2; head.add(strap);
+  // aim group at shoulder height: rotates with pitch, carries the marker and both arms
+  const aim = new THREE.Group(); aim.position.y = 0.46; upper.add(aim);
+  const gun = makeMarker(team, { detail: 'low', type: look.marker, hopperType: look.hopper });
+  const GUN = new THREE.Vector3(0.3, -0.16, 0.11); gun.position.copy(GUN); aim.add(gun);
+  const arms = [], sleeves = [];
+  for (const s of [1, -1]) { // right arm (z+) holds the trigger grip, left arm the front grip
+    const sh = new THREE.Group(); sh.position.set(-0.01, 0, s * 0.2); aim.add(sh);
+    const su = mesh(G.upper, sleeveMat[team]); sh.add(su); sleeves.push(su);
+    const elbow = new THREE.Group(); elbow.position.y = -LIMB.upper; sh.add(elbow);
+    const sf = mesh(G.fore, sleeveMat[team]); elbow.add(sf); sleeves.push(sf);
+    const hand = mesh(G.hand, M.glove, 0, -LIMB.fore, 0); elbow.add(hand);
+    arms.push({ sh, elbow, s });
+  }
+  // precompute the aiming pose and the hands-up "I'm out" pose
+  const gp = gun.userData, shR = arms[0].sh.position, shL = arms[1].sh.position;
+  const aimPose = [
+    solveArm(shR, new THREE.Vector3(GUN.x + gp.grip.x, GUN.y + gp.grip.y + 0.03, GUN.z), LIMB.upper, LIMB.fore, new THREE.Vector3(-0.3, -1, 0.7)),
+    solveArm(shL, new THREE.Vector3(GUN.x + gp.fore.x, GUN.y + gp.fore.y + 0.02, GUN.z - 0.01), LIMB.upper, LIMB.fore, new THREE.Vector3(-0.2, -1, -0.8)),
+  ];
+  const outPose = [
+    solveArm(shR, new THREE.Vector3(0.02, 0.48, 0.3), LIMB.upper, LIMB.fore, new THREE.Vector3(0, -0.2, 1)),
+    solveArm(shL, new THREE.Vector3(0.02, 0.48, -0.3), LIMB.upper, LIMB.fore, new THREE.Vector3(0, -0.2, -1)),
+  ];
   root.traverse((m) => { if (m.isMesh) m.castShadow = high; });
-  return { root, body, upper, legs, torso, arms: [armR, armL, armUp], armUp, gun };
+  return { root, body, pelvis, upper, aim, head, legs, torso, arms, sleeves, aimPose, outPose, gun, gunHome: GUN.clone(), look: { ...look }, team, outK: 0, recoil: 0, walk: 0, breathe: Math.random() * 6 };
+}
+// tagged players turn grey; the pose change (hands up) happens in poseModel
+function setOutLook(m, out) {
+  m.torso.material = out ? M.out[m.team] : jerseyMat(m.team, m.look.jersey);
+  for (const s of m.sleeves) s.material = out ? M.out[m.team] : sleeveMat[m.team];
+}
+const sameLook = (a, b) => a && b && a.marker === b.marker && a.hopper === b.hopper && a.jersey === b.jersey && a.mask === b.mask;
+// keep only catalog items (looks arrive over the network)
+function cleanLook(l) {
+  const o = { ...DEFAULT_LOOK };
+  if (l && typeof l === 'object') for (const k of Object.keys(o)) if (typeof l[k] === 'string' && Object.hasOwn(ITEMS[k], l[k])) o[k] = l[k];
+  return o;
+}
+// bots get a fixed look per slot, so the same bot always wears the same kit
+function botLook(team, i) {
+  const pick = (cat, n) => { const ids = Object.keys(ITEMS[cat]); return ids[n % ids.length]; };
+  return { marker: pick('marker', i * 3 + team), hopper: pick('hopper', i + team * 2), jersey: pick('jersey', i * 5 + team), mask: pick('mask', i * 7 + team * 3) };
+}
+function setLook(p, look) {
+  look = cleanLook(look);
+  if (sameLook(p.model.look, look)) return;
+  const old = p.model, tag = old.tag;
+  scene.remove(old.root); disposeMarker(old.gun);
+  p.model = makeModel(p.team, look); scene.add(p.model.root);
+  if (tag) { old.root.remove(tag); p.model.root.add(tag); p.model.tag = tag; }
+  setOutLook(p.model, !p.alive);
 }
 
-// first-person marker
+// first-person marker, with gloved hands on it
 const vm = new THREE.Group();
 vm.rotation.y = Math.PI / 2 + 0.06;
 vm.position.set(0.17, -0.19, -0.36);
 vm.scale.setScalar(0.85);
 camera.add(vm);
 const VM_BASE = vm.position.clone();
-let vmMuzzle = null;
-const upgradeLook = () => ({ barrel: save.up.barrel, hopper: save.up.hopper, tank: save.up.velocity });
+let vmMuzzle = null, vmMarker = null;
+// a gloved hand gripping a vertical handle at the group's origin (marker space: +x forward, +z right)
+const HG = {
+  palm: new THREE.CapsuleGeometry(0.026, 0.05, 4, 10),
+  finger: new THREE.CapsuleGeometry(0.0115, 0.034, 3, 8),
+  knuckle: new THREE.CapsuleGeometry(0.022, 0.05, 4, 10).rotateX(Math.PI / 2),
+  cuff: new THREE.CylinderGeometry(0.034, 0.036, 0.05, 12),
+  fore: new THREE.CapsuleGeometry(0.036, 0.3, 4, 12),
+};
+function buildHand(g, team, armDir, trigger) {
+  const side = trigger ? 1 : -1;
+  g.add(mesh(HG.palm, M.glove, -0.012, -0.012, side * 0.024));                    // palm on the outer side of the grip
+  for (let i = 0; i < 4; i++) {                                                   // fingers wrapping round the front
+    if (trigger && i === 0) continue;
+    const f = mesh(HG.finger, M.glove, 0.024, 0.014 - i * 0.022, -side * 0.006); f.rotation.x = Math.PI / 2; g.add(f);
+  }
+  g.add(mesh(HG.knuckle, M.glove, 0.012, -0.012, side * 0.006)).children.at(-1).scale.set(0.8, 1.35, 0.9);
+  if (trigger) { const t = mesh(HG.finger, M.glove, 0.05, 0.03, 0.004); t.rotation.z = -Math.PI / 2 + 0.25; g.add(t); }
+  const thumb = mesh(HG.finger, M.glove, 0.0, 0.04, -side * 0.02); thumb.rotation.set(side * 0.5, 0, -0.9); g.add(thumb);
+  // cuff and sleeve running from the wrist back toward the shoulder
+  const dir = armDir.clone().normalize(), q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  const wrist = new THREE.Vector3(-0.025, -0.045, side * 0.02);
+  const cuff = mesh(HG.cuff, M.glove); cuff.position.copy(wrist).addScaledVector(dir, 0.02); cuff.quaternion.copy(q); g.add(cuff);
+  const fore = mesh(HG.fore, sleeveMat[team]); fore.position.copy(wrist).addScaledVector(dir, 0.21); fore.quaternion.copy(q); g.add(fore);
+}
+const upgradeLook = () => ({ barrel: save.up.barrel, hopperLvl: save.up.hopper, tank: save.up.velocity });
 function buildViewmodel() {
   for (const c of [...vm.children]) { vm.remove(c); disposeMarker(c); }
   const me = players.find((p) => p.human);
-  const m = makeMarker(me ? me.team : 0, upgradeLook());
-  vm.add(m); vmMuzzle = m.userData.muzzle;
+  const team = me ? me.team : 0, look = me ? me.look : myLook();
+  const m = makeMarker(team, { ...upgradeLook(), type: look.marker, hopperType: look.hopper });
+  const u = m.userData;
+  // right hand wrapped round the grip with a finger on the trigger; forearm runs back and down off-screen
+  const rh = new THREE.Group(); rh.position.set(u.grip.x, u.grip.y + 0.01, 0); m.add(rh);
+  buildHand(rh, team, new THREE.Vector3(-0.8, -0.5, 0.33), true);
+  // left hand on the front grip (it rides along with a pump handle)
+  const lh = new THREE.Group(); lh.position.set(u.fore.x, u.fore.y, 0); (look.marker === 'pump' ? u.cyclers[0] : m).add(lh);
+  if (look.marker === 'pump') lh.position.set(0, -0.006, 0);
+  buildHand(lh, team, new THREE.Vector3(-0.5, -0.62, -0.6), false);
+  m.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  vm.add(m); vmMuzzle = u.muzzle; vmMarker = m;
 }
 
 // ---------- state ----------
@@ -138,9 +309,9 @@ function makePlayers(n) {
   for (const p of players) { scene.remove(p.model.root); disposeMarker(p.model.gun); }
   players = []; teamSize = n;
   for (let team = 0; team < 2; team++) for (let i = 0; i < n; i++) {
-    const model = makeModel(team); scene.add(model.root);
+    const look = botLook(team, i), model = makeModel(team, look); scene.add(model.root);
     players.push({
-      team, i, human: false, ctrl: 'bot', peer: null, name: TEAMS[team].names[i], model,
+      team, i, human: false, ctrl: 'bot', peer: null, name: TEAMS[team].names[i], model, look,
       x: 0, z: 0, y: 0, vy: 0, ang: 0, bodyAng: 0, pitch: 0, h: H_STAND, crouch: false, alive: true,
       diveT: 0, diveCd: 0, diveDir: 0, queued: 0, crouchOn: false, cWas: false, spaceWas: false, lean: 0,
       ammo: 20, mag: 20, reload: 0, reloadT: 1.6, cd: 0, cool: 0.3, spread: 1, ballSpeed: 46, kills: 0,
@@ -171,9 +342,7 @@ function placeAt(p, s) {
   resolveCircle(p, PR);
 }
 function reviveModel(p) {
-  p.model.torso.material = M.jersey[p.team];
-  for (const a of p.model.arms) a.material = M.jersey[p.team];
-  p.model.armUp.visible = false; p.model.gun.visible = true;
+  setOutLook(p.model, false); p.model.outK = 0; p.model.gun.visible = true;
   for (const c of [...p.model.root.children]) if (c.userData.decal) c.removeFromParent();
 }
 function freshLife(p) {
@@ -201,15 +370,16 @@ const slotIdx = (p) => players.indexOf(p);
 function assignSlots(assign) {
   for (const p of players) {
     p.human = false; p.ctrl = net.mode === 'client' ? 'net' : 'bot'; p.peer = null;
-    p.name = TEAMS[p.team].names[p.i]; setNameTag(p, null);
+    p.name = TEAMS[p.team].names[p.i]; setNameTag(p, null); p.look = botLook(p.team, p.i);
   }
   const me = net.mode ? net.myId : 'local';
   for (const a of assign) {
     const p = players[a.slot]; if (!p) continue;
-    p.peer = a.id; p.name = a.name;
+    p.peer = a.id; p.name = a.name; p.look = a.id === me ? myLook() : cleanLook(a.look);
     if (a.id === me) { p.human = true; p.ctrl = 'local'; }
     else { p.ctrl = net.mode === 'host' ? 'remote' : 'net'; setNameTag(p, a.name); }
   }
+  for (const p of players) setLook(p, p.look);
   const h = human(); myTeam = h ? h.team : 0;
 }
 function setNameTag(p, name) {
@@ -229,7 +399,11 @@ function setNameTag(p, name) {
 }
 function applyLoadout() {
   for (const p of players) {
-    if (p.human) { p.mag = stat('hopper'); p.cool = stat('rate'); p.reloadT = stat('reload'); p.spread = stat('barrel'); p.ballSpeed = stat('velocity'); }
+    if (p.human) {
+      const mk = ITEMS.marker[p.look.marker].stats, hp = ITEMS.hopper[p.look.hopper].stats;
+      p.mag = Math.max(8, stat('hopper') + mk.mag + hp.mag); p.cool = stat('rate') * mk.rate; p.reloadT = Math.max(0.5, stat('reload') + hp.reload);
+      p.spread = stat('barrel') * mk.spread; p.ballSpeed = stat('velocity') + mk.speed;
+    }
     else { p.mag = BOT.mag; p.reloadT = BOT.reload; p.ballSpeed = BOT.ball; }
   }
 }
@@ -272,6 +446,8 @@ function spawnBall(owner, pos, vel) {
   const m = ballPool.pop() || new THREE.Mesh(ballGeo, ballMats[0]);
   m.material = ballMats[owner.team]; m.position.copy(pos); scene.add(m);
   balls.push({ pos: pos.clone(), vel: vel.clone(), team: owner.team, owner, life: 2.2, mesh: m });
+  cycleMarker(owner.model.gun); owner.model.recoil = 1;
+  if (owner.human) cycleMarker(vmMarker);
   sfx.shot(owner.human ? null : pos);
 }
 function fire(p, pos, vel) {
@@ -343,8 +519,7 @@ function eliminate(p, by, point, rs) {
   const d = world.addSplat(point, n, by.team, 0.42, p.model.root); if (d) d.userData.decal = true;
   world.puff(point, by.team);
   sfx.tag(point);
-  p.model.torso.material = M.out[p.team];
-  p.model.armUp.visible = true;
+  setOutLook(p.model, true);
   by.kills++;
   feed.unshift({ a: by.name, at: by.team, b: p.name, bt: p.team, t: 5 }); if (feed.length > 5) feed.pop();
   renderFeed();
@@ -870,7 +1045,7 @@ function lobbyAssign() {
   return lobby.players.map((pl, k) => {
     const team = lobby.mode === 'coop' ? 0 : k % 2;
     const idx = lobby.mode === 'coop' ? k : k >> 1;
-    return { slot: slotOrder(team, n)[idx], id: pl.id, name: pl.name };
+    return { slot: slotOrder(team, n)[idx], id: pl.id, name: pl.name, look: cleanLook(pl.look) };
   });
 }
 function broadcastLobby() {
@@ -895,7 +1070,7 @@ const cleanName = (s) => String(s ?? '').replace(/[^\p{L}\p{N} _.-]/gu, '').trim
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const packPose = (p) => [p.x, p.z, p.ang, p.bodyAng, p.pitch, p.h, p.lean, p.alive ? 1 : 0, p.vx, p.vz, p.y || 0].map(r3);
 function markOut(p) {
-  p.alive = false; p.model.torso.material = M.out[p.team]; p.model.armUp.visible = true;
+  p.alive = false; setOutLook(p.model, true);
   if (p.human) { sfx.out(); specIdx = 0; }
 }
 function packObjectives() {
@@ -912,8 +1087,14 @@ function hostMessage(from, m) {
       if (lobby.players.some((l) => l.id === from)) return;
       if (inGame() || state === 'paused') { sendTo(from, { t: 'busy' }); kick(from); return; }
       if (lobby.players.length >= maxPlayers()) { sendTo(from, { t: 'full' }); kick(from); return; }
-      lobby.players.push({ id: from, name: cleanName(m.name) });
+      lobby.players.push({ id: from, name: cleanName(m.name), look: cleanLook(m.look) });
       broadcastLobby(); sfx.beep();
+      return;
+    }
+    case 'look': { // a joiner changed gear in the lobby
+      const l = lobby.players.find((q) => q.id === from);
+      if (!l || inGame()) return;
+      l.look = cleanLook(m.l); broadcastLobby();
       return;
     }
     case 'fire': {
@@ -941,7 +1122,7 @@ function hostPeerLeft(id) {
   lobby.players = lobby.players.filter((l) => l.id !== id);
   const p = players.find((q) => q.peer === id);
   if (p) {
-    p.ctrl = 'bot'; p.peer = null; p.name = TEAMS[p.team].names[p.i]; setNameTag(p, null);
+    p.ctrl = 'bot'; p.peer = null; p.name = TEAMS[p.team].names[p.i]; setNameTag(p, null); p.look = botLook(p.team, p.i); setLook(p, p.look);
     p.mag = BOT.mag; p.reloadT = BOT.reload; p.ballSpeed = BOT.ball; p.goal = null; p.tgt = null; p.path = null;
     broadcast({ t: 'ctrl', slot: slotIdx(p), name: p.name });
     feed.unshift({ a: '', at: p.team, b: `${p.name} (bot) joins`, bt: p.team, t: 4, note: true }); renderFeed();
@@ -955,7 +1136,7 @@ function clientMessage(m) {
       if (!Array.isArray(m.players)) return;
       const game = validMode(m.game) ? m.game : 'elim';
       lobby = { code: cleanCode(m.code), mode: m.mode === 'coop' ? 'coop' : 'teams', game, map: validMap(m.map, game) ? m.map : 'random',
-        players: m.players.slice(0, 12).map((l) => ({ id: String(l.id), name: cleanName(l.name) })) };
+        players: m.players.slice(0, 12).filter((l) => l && typeof l === 'object').map((l) => ({ id: String(l.id), name: cleanName(l.name), look: cleanLook(l.look) })) };
       if (!inGame()) { gameMode = game; ensureMap(previewMap(lobby.map, game), game); }
       renderLobby();
       if (!inGame() && state !== 'results') { state = 'lobby'; showScreen('lobby'); }
@@ -967,7 +1148,7 @@ function clientMessage(m) {
     case 'start': {
       if (!Array.isArray(m.assign) || !validMode(m.game) || m.ts !== MODES[m.game].teamSize || !validMap(m.map, m.game)) return;
       setupMode(m.game, m.map);
-      const assign = m.assign.filter((a) => a && okSlot(a.slot)).map((a) => ({ slot: a.slot, id: String(a.id), name: cleanName(a.name) }));
+      const assign = m.assign.filter((a) => a && okSlot(a.slot)).map((a) => ({ slot: a.slot, id: String(a.id), name: cleanName(a.name), look: cleanLook(a.look) }));
       assignSlots(assign);
       if (!human()) return;
       beginMatch(m.diff);
@@ -1138,25 +1319,71 @@ function update(dt) {
   updateCamera(dt);
   world.update(dt, clock);
 }
+const ease = (cur, tgt, k) => cur + (tgt - cur) * k;
 function syncModels(dt) {
+  const k = Math.min(1, dt * 12);
   for (const p of players) {
     const m = p.model;
     let vis = !(p.human && p.alive && inGameOrPaused());
     if (p.alive && p.protect > 0 && ((clock * 8) | 0) % 2) vis = false; // blink while spawn-protected
     if (!p.alive && respawnMode() && inGame()) vis = false;          // the tagged walk off: hide them until they respawn
     m.root.visible = vis;
-    m.root.position.set(p.x, p.y || 0, p.z);
-    m.root.rotation.y = -p.bodyAng;
-    m.upper.rotation.y = -angDiff(p.ang, p.bodyAng);
-    m.upper.rotation.x = p.lean * 0.26;
-    m.body.scale.y = p.h / H_STAND;
-    const speed = p.alive ? Math.hypot(p.vx, p.vz) : 0;
-    if (speed > 0.4) p.phase += dt * speed * 2.2;
-    const swing = speed > 0.4 ? Math.sin(p.phase) * 0.55 : 0;
-    m.legs[0].rotation.z += (swing - m.legs[0].rotation.z) * 0.3;
-    m.legs[1].rotation.z += (-swing - m.legs[1].rotation.z) * 0.3;
-    m.gun.rotation.z = p.alive ? p.pitch * 0.8 : -0.6;
+    animateMarker(m.gun, dt);
+    if (!vis) continue;
+    poseModel(m, p, dt, k);
   }
+  if (vmMarker) animateMarker(vmMarker, dt);
+}
+// the whole-body pose: legs from movement, crouch and dive from height, spine from aim and lean, arms by IK
+function poseModel(m, p, dt, k) {
+  m.root.position.set(p.x, p.y || 0, p.z);
+  m.root.rotation.y = -p.bodyAng;
+  const crouch = clamp((H_STAND - p.h) / (H_STAND - H_CROUCH), 0, 1);
+  const prone = clamp((H_CROUCH - p.h) / (H_CROUCH - H_PRONE), 0, 1);
+  // movement relative to where the hips face
+  const speed = p.alive ? Math.hypot(p.vx, p.vz) : 0, ca = Math.cos(p.bodyAng), sa = Math.sin(p.bodyAng);
+  const fwd = speed > 0.01 ? (p.vx * ca + p.vz * sa) / speed : 1, side = speed > 0.01 ? (-p.vx * sa + p.vz * ca) / speed : 0;
+  const run = clamp(speed / 6, 0, 1), moving = speed > 0.4 ? 1 : 0;
+  if (moving) p.phase += dt * (4.5 + speed * 1.15) * (crouch > 0.5 ? 0.8 : 1);
+  m.walk = ease(m.walk, moving * (1 - prone), Math.min(1, dt * 8));
+  const stride = (0.42 + run * 0.35) * (1 - crouch * 0.45) * m.walk;
+  // legs: hip swings forward/back (and out to the side when strafing), knee bends as the leg comes through
+  for (let j = 0; j < 2; j++) {
+    const L = m.legs[j], ph = p.phase + j * Math.PI;
+    const sw = Math.sin(ph) * stride, lift = Math.max(0, Math.cos(ph)) * m.walk * (0.5 + run * 0.6);
+    let hz = sw * fwd + crouch * 1.0, hx = -sw * side * 0.8;
+    let kz = -(0.06 + lift) * (1 - crouch) - crouch * 1.9;
+    if (j === 1 && !moving) { hz -= 0.35 * crouch; kz += 0.5 * crouch; } // a staggered, braced crouch
+    hz *= 1 - prone; hx *= 1 - prone; kz *= 1 - prone * 0.9;
+    L.hip.rotation.z = ease(L.hip.rotation.z, hz, k);
+    L.hip.rotation.x = ease(L.hip.rotation.x, hx + (j ? 0.04 : -0.04), k);
+    L.knee.rotation.z = ease(L.knee.rotation.z, kz, k);
+    L.ankle.rotation.z = -(L.hip.rotation.z + L.knee.rotation.z) * 0.85;
+  }
+  // pelvis height follows the legs, with a little bob on every step
+  const bob = Math.abs(Math.cos(p.phase)) * 0.045 * m.walk * (0.6 + run);
+  m.pelvis.position.y = ease(m.pelvis.position.y, LIMB.hip - crouch * 0.36 * (1 - prone) - prone * 0.62 + bob - m.walk * 0.03, k);
+  m.body.rotation.z = ease(m.body.rotation.z, -prone * 1.25, k);
+  m.pelvis.rotation.y = Math.sin(p.phase) * 0.12 * m.walk;                  // hips twist with the stride
+  // spine: turn toward the aim, lean around cover, bend forward when running or crouched; breathe
+  m.breathe += dt * (1.6 + run * 2);
+  m.torso.scale.x = 0.72 * (1 + Math.sin(m.breathe) * 0.015); m.torso.scale.z = 1 + Math.sin(m.breathe) * 0.012;
+  m.upper.rotation.y = -angDiff(p.ang, p.bodyAng) - m.pelvis.rotation.y;
+  m.upper.rotation.x = ease(m.upper.rotation.x, p.lean * 0.32 + side * run * 0.08, k);
+  m.upper.rotation.z = ease(m.upper.rotation.z, -(run * 0.16 + crouch * 0.18) * (1 - prone), k);
+  // tagged: hands go up, marker held high
+  m.outK = ease(m.outK, p.alive ? 0 : 1, Math.min(1, dt * 6));
+  const o = m.outK, pitch = p.alive ? p.pitch : 0.15;
+  m.aim.rotation.z = (pitch - m.upper.rotation.z - m.body.rotation.z * 0.8) * (1 - o);
+  m.head.rotation.z = pitch * 0.45 + o * 0.25 - m.upper.rotation.z * 0.5;
+  for (let j = 0; j < 2; j++) {
+    const A = m.arms[j], a = m.aimPose[j], b = m.outPose[j];
+    A.sh.quaternion.copy(a.q1).slerp(b.q1, o); A.elbow.quaternion.copy(a.q2).slerp(b.q2, o);
+  }
+  m.gun.visible = o < 0.5;
+  m.recoil = Math.max(0, m.recoil - dt * 9);
+  m.gun.position.x = m.gunHome.x - m.recoil * 0.035;
+  m.gun.rotation.z = m.recoil * 0.05;
 }
 const inGameOrPaused = () => inGame() || state === 'paused';
 const homeCam = new THREE.Vector3();
@@ -1343,16 +1570,55 @@ function renderHome() {
   for (const b of document.querySelectorAll('#diff button')) b.classList.toggle('on', b.dataset.d === save.settings.diff);
   renderMapPick();
 }
+// ---------- pro shop: upgrades + markers, hoppers, jerseys, masks ----------
+let shopTab = 'upgrades', trying = null; // trying: { cat, id } shown in the preview before buying
+const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+function itemStats(cat, it) {
+  const s = it.stats, out = [];
+  if (!s) return '';
+  const pct = (v) => (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
+  if (cat === 'marker') {
+    if (s.rate !== 1) out.push([1 / s.rate - 1 > 0, pct(1 / s.rate - 1) + ' fire rate']);
+    if (s.spread !== 1) out.push([s.spread < 1, pct(1 - s.spread) + ' accuracy']);
+    if (s.speed) out.push([s.speed > 0, '+' + s.speed + ' m/s']);
+    if (s.mag) out.push([s.mag > 0, (s.mag > 0 ? '+' : '') + s.mag + ' balls']);
+  } else {
+    if (s.mag) out.push([s.mag > 0, '+' + s.mag + ' balls']);
+    if (s.reload) out.push([s.reload < 0, (s.reload > 0 ? '+' : '') + s.reload.toFixed(2) + ' s reload']);
+  }
+  if (!out.length) return '<div class="statrow"><span>Standard</span></div>';
+  return `<div class="statrow">${out.map(([g, t]) => `<span class="${g ? 'good' : 'bad'}">${t}</span>`).join('')}</div>`;
+}
 function renderShop() {
-  $('shopGrid').innerHTML = Object.entries(UPGRADES).map(([k, u]) => {
-    const lvl = save.up[k], cost = costOf(k), now = u.fmt(u.value(lvl));
-    const next = cost == null ? '' : `<span class="arrow">→</span><b>${u.fmt(u.value(lvl + 1))}</b>`;
-    const pips = [...Array(u.max)].map((_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
-    const btn = cost == null ? '<button class="buy" disabled>MAXED</button>'
-      : `<button class="buy" data-k="${k}" ${save.coins < cost ? 'data-poor="1"' : ''}><i class="coin"></i>${cost}</button>`;
-    return `<div class="card"><div class="ico">${u.icon}</div><h3>${u.name}</h3><p>${u.desc}</p>
-      <div class="pips">${pips}</div><div class="vals">${now}${next}</div>${btn}</div>`;
+  for (const b of document.querySelectorAll('#shopTabs button')) b.classList.toggle('on', b.dataset.tab === shopTab);
+  if (shopTab === 'upgrades') {
+    $('shopGrid').innerHTML = Object.entries(UPGRADES).map(([k, u]) => {
+      const lvl = save.up[k], cost = costOf(k), now = u.fmt(u.value(lvl));
+      const next = cost == null ? '' : `<span class="arrow">→</span><b>${u.fmt(u.value(lvl + 1))}</b>`;
+      const pips = [...Array(u.max)].map((_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
+      const btn = cost == null ? '<button class="buy" disabled>MAXED</button>'
+        : `<button class="buy" data-k="${k}" ${save.coins < cost ? 'data-poor="1"' : ''}><i class="coin"></i>${cost}</button>`;
+      return `<div class="card"><div class="ico">${u.icon}</div><h3>${u.name}</h3><p>${u.desc}</p>
+        <div class="pips">${pips}</div><div class="vals">${now}${next}</div>${btn}</div>`;
+    }).join('');
+    return;
+  }
+  const cat = shopTab;
+  $('shopGrid').innerHTML = Object.entries(ITEMS[cat]).map(([id, it]) => {
+    const own = owns(cat, id), on = save.equip[cat] === id, sel = trying && trying.cat === cat && trying.id === id;
+    const btn = on ? '<button class="buy" disabled>EQUIPPED</button>'
+      : own ? `<button class="buy equip" data-eq="${id}">Equip</button>`
+      : `<button class="buy" data-item="${id}" ${save.coins < it.price ? 'data-poor="1"' : ''}><i class="coin"></i>${it.price}</button>`;
+    const sw = cat === 'mask' ? `<div class="swatch" style="background:linear-gradient(90deg, ${hex(it.color)} 0 55%, ${hex(it.lens)} 55%)"></div>` : '';
+    return `<div class="card item${sel ? ' sel' : ''}" data-try="${id}">${sw}<div class="tagline">${own ? (on ? 'Equipped' : 'Owned') : 'Click to try on'}</div>
+      <h3>${esc(it.name)}</h3><p>${esc(it.desc)}</p>${itemStats(cat, it)}${btn}</div>`;
   }).join('');
+}
+// the gear the preview shows: what's equipped, with the item being tried swapped in
+function previewLook() {
+  const l = myLook();
+  if (trying) l[trying.cat] = trying.id;
+  return l;
 }
 let preview = null;
 function refreshPreview() {
@@ -1366,19 +1632,35 @@ function refreshPreview() {
     s.environment = pm.fromScene(new RoomEnvironment(r), 0.04).texture; pm.dispose();
     const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(1, 2, 2); s.add(key);
     const rim = new THREE.DirectionalLight(0x9fc3ff, 1.4); rim.position.set(-2, 1, -2); s.add(rim);
-    const cam = new THREE.PerspectiveCamera(28, 2, 0.01, 10);
-    cam.position.set(0, 0.1, 1.05); cam.lookAt(0, 0, 0);
+    const cam = new THREE.PerspectiveCamera(28, 2, 0.01, 20);
     const pivot = new THREE.Group(); s.add(pivot);
-    preview = { r, s, cam, pivot, m: null, drag: null, yaw: 0.6 };
+    preview = { r, s, cam, pivot, m: null, model: null, drag: null, yaw: 0.6, t: 0 };
     c.addEventListener('pointerdown', (e) => { preview.drag = e.clientX; c.setPointerCapture(e.pointerId); });
     c.addEventListener('pointermove', (e) => { if (preview.drag != null) { preview.yaw += (e.clientX - preview.drag) * 0.01; preview.drag = e.clientX; } });
     c.addEventListener('pointerup', () => { preview.drag = null; });
   }
-  if (preview.m) { preview.pivot.remove(preview.m); disposeMarker(preview.m); }
-  preview.m = makeMarker(0, upgradeLook());
-  preview.m.position.set(-0.07, -0.03, 0);
-  preview.pivot.add(preview.m);
+  if (preview.m) { preview.pivot.remove(preview.m); disposeMarker(preview.m); preview.m = null; }
+  if (preview.model) { preview.pivot.remove(preview.model.root); disposeMarker(preview.model.gun); preview.model = null; }
+  const look = previewLook(), body = shopTab === 'jersey' || shopTab === 'mask';
+  const h = human(), team = h ? h.team : 0;
+  $('markerPreview').parentElement.classList.toggle('tall', body);
+  if (body) {
+    // the whole player, standing at ease
+    preview.model = makeModel(team, look);
+    preview.model.root.position.y = -0.95;
+    preview.pivot.add(preview.model.root);
+    preview.cam.position.set(0, shopTab === 'mask' ? 0.7 : 0.1, shopTab === 'mask' ? 1.5 : 4.1); preview.cam.lookAt(0, shopTab === 'mask' ? 0.62 : -0.06, 0);
+    $('previewLabel').textContent = 'Your player · drag to spin';
+  } else {
+    preview.m = makeMarker(team, { ...upgradeLook(), type: look.marker, hopperType: look.hopper });
+    const wide = look.marker === 'milsim' || look.marker === 'pump';
+    preview.m.position.set(wide ? -0.16 : -0.07, -0.03, 0);
+    preview.pivot.add(preview.m);
+    preview.cam.position.set(0, 0.1, wide ? 1.35 : 1.05); preview.cam.lookAt(0, 0, 0);
+    $('previewLabel').textContent = `${ITEMS.marker[look.marker].name} · ${ITEMS.hopper[look.hopper].name} · drag to spin`;
+  }
 }
+const fakeP = { x: 0, z: 0, y: 0, vx: 0, vz: 0, bodyAng: 0, ang: 0, pitch: 0, h: H_STAND, lean: 0, alive: true, phase: 0 };
 function renderPreview(dt) {
   if (!preview || $('shop').classList.contains('hidden')) return;
   const c = preview.r.domElement, w = c.clientWidth, h = c.clientHeight;
@@ -1388,15 +1670,59 @@ function renderPreview(dt) {
   }
   if (preview.drag == null) preview.yaw += dt * 0.5;
   preview.pivot.rotation.y = preview.yaw;
+  preview.t += dt;
+  // show off the action: cycle the marker every so often
+  if (preview.m) {
+    if (preview.t > 1.4) { preview.t = 0; cycleMarker(preview.m); }
+    animateMarker(preview.m, dt);
+  }
+  if (preview.model) {
+    const m = preview.model;
+    poseModel(m, fakeP, dt, Math.min(1, dt * 12));
+    m.root.position.set(0, -0.95, 0); m.root.rotation.y = 0;
+    if (preview.t > 1.6) { preview.t = 0; cycleMarker(m.gun); m.recoil = 1; }
+    animateMarker(m.gun, dt);
+  }
   preview.r.render(preview.s, preview.cam);
 }
-
-$('shopGrid').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-k]'); if (!b) return;
-  initAudio();
-  if (buy(b.dataset.k)) { sfx.buy(); renderShop(); updateCoins(); refreshPreview(); }
-  else { sfx.deny(); b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); }
+$('shopTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-tab]'); if (!b) return;
+  initAudio(); sfx.click();
+  shopTab = b.dataset.tab; trying = null;
+  renderShop(); refreshPreview();
 });
+$('shopGrid').addEventListener('click', (e) => {
+  initAudio();
+  const deny = (b) => { sfx.deny(); b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); };
+  const up = e.target.closest('button[data-k]');
+  if (up) {
+    if (buy(up.dataset.k)) { sfx.buy(); renderShop(); updateCoins(); refreshPreview(); } else deny(up);
+    return;
+  }
+  const bi = e.target.closest('button[data-item]');
+  if (bi) {
+    if (buyItem(shopTab, bi.dataset.item)) { sfx.buy(); trying = null; afterGearChange(); } else deny(bi);
+    return;
+  }
+  const be = e.target.closest('button[data-eq]');
+  if (be) { equipItem(shopTab, be.dataset.eq); sfx.click(); trying = null; afterGearChange(); return; }
+  const card = e.target.closest('[data-try]');
+  if (card) { sfx.click(); trying = { cat: shopTab, id: card.dataset.try }; renderShop(); refreshPreview(); }
+});
+// new gear: refresh the shop, your in-game model and first-person marker, and tell the room
+function sendLook() {
+  if (!net.mode || inGame()) return;
+  if (net.mode === 'client') netSend({ t: 'look', l: myLook() });
+  else { const l = lobby.players.find((q) => q.id === 'host'); if (l) { l.look = myLook(); broadcastLobby(); } }
+}
+function afterGearChange() {
+  renderShop(); updateCoins(); refreshPreview();
+  const h = human();
+  if (h) { h.look = myLook(); setLook(h, h.look); }
+  buildViewmodel();
+  if (!inGame()) applyLoadout();
+  sendLook();
+}
 $('diff').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   save.settings.diff = b.dataset.d; persist(); renderHome(); initAudio(); sfx.click();
@@ -1460,7 +1786,7 @@ nav('btnHost', async () => {
   try {
     const code = await netHost();
     const game = save.settings.gameMode || 'elim';
-    lobby = { code, mode: hostMode, game, map: mapSel(game), players: [{ id: 'host', name: myName() }] };
+    lobby = { code, mode: hostMode, game, map: mapSel(game), players: [{ id: 'host', name: myName(), look: myLook() }] };
     state = 'lobby'; mpBusy(false); showScreen('lobby');
   } catch (e) { mpBusy(false, e.message || "Couldn't create a room."); }
 });
@@ -1470,7 +1796,7 @@ nav('btnJoin', async () => {
   mpBusy(true, `Joining ${code}…`);
   try {
     await netJoin(code);
-    netSend({ t: 'hello', name: myName() });
+    netSend({ t: 'hello', name: myName(), look: myLook() });
     mpBusy(false, 'Connected. Waiting for the lobby…');
   } catch (e) { mpBusy(false, e.message || "Couldn't join that room."); }
 });

@@ -72,6 +72,17 @@
   .buy { margin-top:auto; padding:10px; border-radius:10px; border:0; background:var(--accent); color:#191919; font-weight:800; font-size:16px; }
   .buy[data-poor] { background:rgba(255,255,255,.1); color:var(--muted); }
   .buy:disabled { background:rgba(53,208,127,.15); color:var(--green); cursor:default; }
+  .shop-tabs { display:flex; flex-wrap:wrap; margin-bottom:12px; }
+  .shop-tabs button { flex:1 1 auto; padding:9px 10px; }
+  .preview-wrap.tall { height:clamp(240px, 42vh, 400px); }
+  .card.item { cursor:pointer; }
+  .card.item.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  .card .swatch { height:34px; border-radius:8px; border:1px solid var(--line); }
+  .card .tagline { font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .statrow { display:flex; flex-wrap:wrap; gap:4px; font-size:12px; }
+  .statrow span { padding:2px 6px; border-radius:6px; background:rgba(255,255,255,.07); }
+  .statrow .good { color:var(--green); } .statrow .bad { color:#ff7a7a; }
+  .buy.equip { background:rgba(255,255,255,.14); color:#fff; }
   .shake { animation:shake .3s; }
   @keyframes shake { 25% { transform:translateX(-5px); } 75% { transform:translateX(5px); } }
 
@@ -185,13 +196,13 @@
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "./src/main.js": "./src/main.js?v=20261110040546",
-  "./src/world.js": "./src/world.js?v=20261110040546",
-  "./src/maps.js": "./src/maps.js?v=20261110040546",
-  "./src/marker.js": "./src/marker.js?v=20261110040546",
-  "./src/economy.js": "./src/economy.js?v=20261110040546",
-  "./src/audio.js": "./src/audio.js?v=20261110040546",
-  "./src/net.js": "./src/net.js?v=20261110040546"
+  "./src/main.js": "./src/main.js?v=20261110230449",
+  "./src/world.js": "./src/world.js?v=20261110230449",
+  "./src/maps.js": "./src/maps.js?v=20261110230449",
+  "./src/marker.js": "./src/marker.js?v=20261110230449",
+  "./src/economy.js": "./src/economy.js?v=20261110230449",
+  "./src/audio.js": "./src/audio.js?v=20261110230449",
+  "./src/net.js": "./src/net.js?v=20261110230449"
 } }
 </script>
 </head>
@@ -238,7 +249,7 @@
       <button class="arrow" data-d="1" aria-label="Next map">▶</button>
     </div>
     <button class="btn" id="btnMP">👥 Multiplayer</button>
-    <button class="btn" id="btnShop">🔧 Upgrade marker</button>
+    <button class="btn" id="btnShop">🛒 Pro shop</button>
     <button class="btn" id="btnSettings">⚙️ Settings</button>
     <button class="btn" id="btnHelp">❓ How to play</button>
     <div id="stats"></div>
@@ -249,13 +260,16 @@
 <div id="shop" class="screen dim hidden">
   <div class="panel">
     <div class="shop-head">
-      <h2>Marker upgrades</h2>
+      <h2>Pro shop</h2>
       <div class="row" style="align-items:center">
         <div class="coinpill"><i class="coin"></i><span class="coin-count">0</span></div>
         <button class="btn" id="shopBack" style="width:auto">Back</button>
       </div>
     </div>
-    <div class="preview-wrap"><canvas id="markerPreview"></canvas><span>Your marker · drag to spin</span></div>
+    <div class="seg shop-tabs" id="shopTabs">
+      <button data-tab="upgrades" class="on">🔧 Upgrades</button><button data-tab="marker">🔫 Markers</button><button data-tab="hopper">🛢️ Hoppers</button><button data-tab="jersey">👕 Jerseys</button><button data-tab="mask">🥽 Masks</button>
+    </div>
+    <div class="preview-wrap"><canvas id="markerPreview"></canvas><span id="previewLabel">Your marker · drag to spin</span></div>
     <div id="shopGrid"></div>
     <p style="color:var(--muted);font-size:13px;margin:14px 0 0">Earn coins by tagging opponents (+25), winning rounds (+40), finishing a match (+30) and winning it (+150). Difficulty multiplies every reward.</p>
   </div>
@@ -347,6 +361,7 @@
       <tr><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pause</td></tr>
     </table>
     <p>Paintballs drop over distance, so aim a little high on far targets. Snakes and doritos are low: crouch to hide behind them. Leaning only exposes your upper body, so hug the side of a tall bunker and peek out with <kbd>Q</kbd>/<kbd>E</kbd>.</p>
+    <p><b>Pro shop:</b> spend coins on marker upgrades, new markers (Autococker, pump, milsim carbine), hoppers, jerseys and masks. Click any item to try it on before you buy. Markers and hoppers change your stats; jerseys and masks are just for looks, and other players see your gear in multiplayer.</p>
     <button class="btn" id="helpBack" style="text-align:center">Back</button>
   </div>
 </div>
@@ -371,7 +386,7 @@
     <div id="resLines"></div>
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:18px">
       <button class="btn primary" id="resAgain">PLAY AGAIN</button>
-      <div class="row"><button class="btn" id="resShop">🔧 Upgrades</button><button class="btn" id="resHome">Home</button></div>
+      <div class="row"><button class="btn" id="resShop">🛒 Pro shop</button><button class="btn" id="resHome">Home</button></div>
     </div>
   </div>
 </div>
@@ -379,6 +394,6 @@
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
 <!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
-<script type="module" src="src/main.js?v=20261110040546"></script>
+<script type="module" src="src/main.js?v=20261110230449"></script>
 </body>
 </html>

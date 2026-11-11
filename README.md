@@ -16,7 +16,8 @@ You play on Blue with three bot teammates against four Red bots on an outdoor fi
 | Q / E (hold) | Lean left / right around cover (only your upper body is exposed) |
 | Space | Dive and slide low |
 | Shift | Sprint (less accurate) |
-| C | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings) || R | Reload |
+| C | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings) |
+| R | Reload |
 | Esc / P | Pause |
 
 ## Multiplayer
@@ -33,7 +34,22 @@ Click **Multiplayer** on the home screen.
 
 Earn coins for tagging opponents (+25), winning rounds (+40), finishing a match (+30) and winning it (+150). Easy pays ×0.75, Hard pays ×1.5.
 
-Spend them on the **Upgrade marker** screen:
+Spend them in the **Pro shop**. Click any item to try it on in the 3D preview before buying. Your gear shows on your player, in your first-person view, and to everyone in a multiplayer room.
+
+**Markers** (each has its own model and handling; upgrades apply on top):
+
+| Marker | Price | Handling |
+| --- | --- | --- |
+| Tourney Electro | free | Light, fast electronic marker |
+| Autococker | 600 | Back block, bolt and pump rod cycle on every shot. 22% more accurate, 11% slower trigger, +2 m/s |
+| Stock-Class Pump | 350 | Pump the handle every shot. 45% more accurate, +6 m/s, but much slower and 4 fewer balls |
+| Milsim Carbine | 850 | Stock, rail and red-dot sight. +6 balls, +5 m/s, 15% more accurate |
+
+**Hoppers:** Agitated Loader (free), Gravity Bottle (150: +8 balls, slower reload), Speed Feed Pro (300: 0.3 s faster reload).
+
+**Jerseys** (Classic, Racing Stripes, Chevron, Woodland Camo, Hot Rod Flames, Pro #7) and **masks** (Stealth Black, Arctic White, Crimson, Gold Mirror, Chrome) are cosmetic, in your team's colours.
+
+**Upgrades:**
 
 | Upgrade | Effect | Levels |
 | --- | --- | --- |
@@ -102,7 +118,9 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 - `src/economy.js`: coins, upgrades, saved progress
 - `src/audio.js`: procedural sound effects
 - `src/net.js`: peer-to-peer rooms (host, join, messages)
-- `src/marker.js`: the procedural paintball marker model
+- `src/marker.js`: the procedural paintball markers (Tourney, Autococker with cycling back block, pump, milsim) and hoppers
+
+Players are jointed procedural models (hips, knees, ankles, spine, head, and arms posed with two-bone IK onto the marker's grips) with a walk/run cycle, a real crouch, dive, lean, breathing and a hands-up pose when tagged. All models are generated in code; nothing is downloaded.
 
 Every push to `main` redeploys the site on GitHub Pages within about a minute.
 
