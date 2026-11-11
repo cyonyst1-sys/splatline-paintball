@@ -11,18 +11,18 @@ const PI = Math.PI;
 
 // footprint (w along local x, d along local z) or radius, and height: these define collision
 export const KINDS = {
-  block:     { t: 'b', w: 1.0, d: 2.6, h: 1.25 },
-  wall:      { t: 'b', w: 2.4, d: 0.9, h: 1.05 },
-  longwall:  { t: 'b', w: 4.5, d: 0.8, h: 1.6 },
-  tall:      { t: 'b', w: 1.45, d: 1.45, h: 2.5 },
-  temple:    { t: 'b', w: 1.3, d: 2.6, h: 1.85 },
-  container: { t: 'b', w: 6.0, d: 2.4, h: 2.6 },
-  snake:     { t: 'b', w: 10.9, d: 0.88, h: 0.9 },
-  can:       { t: 'c', r: 0.6, h: 1.9 },
-  bigcan:    { t: 'c', r: 0.8, h: 2.4 },
-  minican:   { t: 'c', r: 0.5, h: 1.15 },
-  cake:      { t: 'c', r: 1.7, h: 1.1 },
-  tri:       { t: 't', R: 1.05, r: 0.75, h: 1.3 },
+  block:     { t: 'b', w: 1.0, d: 2.6, h: 1.75 },
+  wall:      { t: 'b', w: 2.4, d: 0.9, h: 1.5 },
+  longwall:  { t: 'b', w: 4.5, d: 0.8, h: 2.25 },
+  tall:      { t: 'b', w: 1.45, d: 1.45, h: 3.4 },
+  temple:    { t: 'b', w: 1.3, d: 2.6, h: 2.55 },
+  container: { t: 'b', w: 6.0, d: 2.4, h: 3.2 },
+  snake:     { t: 'b', w: 10.9, d: 1.0, h: 1.25 },
+  can:       { t: 'c', r: 0.6, h: 2.6 },
+  bigcan:    { t: 'c', r: 0.8, h: 3.3 },
+  minican:   { t: 'c', r: 0.5, h: 1.6 },
+  cake:      { t: 'c', r: 1.7, h: 1.55 },
+  tri:       { t: 't', R: 1.05, r: 0.75, h: 1.8 },
 };
 
 // ---------- textures ----------
@@ -409,10 +409,10 @@ const STYLES = {
   wood(kind, K, kit) {
     const P = MT.planks(), D = MT.darkwood(), B = MT.bark(), E = MT.rings();
     if (kind === 'snake') { // fallen log
-      const L = K.w - 0.3;
-      kit.add(B, G.cyl, 0, 0.45, 0, 0.45, L, 0.45, 0, 0, PI / 2);
-      for (const s of [-1, 1]) kit.add(E, G.cyl, s * L / 2, 0.45, 0, 0.44, 0.02, 0.44, 0, 0, PI / 2);
-      for (let i = 0; i < 4; i++) kit.add(B, G.cylLo, rnd(-L / 2.5, L / 2.5), 0.75, rnd(-0.1, 0.1), 0.07, 0.5, 0.07, rnd(0, 6), rnd(-0.6, 0.6), rnd(-0.6, 0.6));
+      const L = K.w - 0.3, r = K.h / 2;
+      kit.add(B, G.cyl, 0, r, 0, r, L, r, 0, 0, PI / 2);
+      for (const s of [-1, 1]) kit.add(E, G.cyl, s * L / 2, r, 0, r - 0.01, 0.02, r - 0.01, 0, 0, PI / 2);
+      for (let i = 0; i < 4; i++) kit.add(B, G.cylLo, rnd(-L / 2.5, L / 2.5), K.h * 0.83, rnd(-0.1, 0.1), 0.07, 0.5, 0.07, rnd(0, 6), rnd(-0.6, 0.6), rnd(-0.6, 0.6));
     } else if (K.t === 'b') { // plank walls with posts and a top rail
       kit.add(P, G.box, 0, K.h / 2, 0, K.w, K.h, K.d);
       alongLong(K, ({ L, D: dd, at }) => {
@@ -563,7 +563,7 @@ const STYLES = {
 
   snow(kind, K, kit) {
     const SN = MT.snow(), IC = MT.ice();
-    if (kind === 'snake') kit.add(SN, G.sph, 0, 0.3, 0, K.w / 2, 0.6, K.d / 2 + 0.12); // snowbank
+    if (kind === 'snake') kit.add(SN, G.sph, 0, 0, 0, K.w / 2, K.h, K.d / 2 + 0.12); // snowbank
     else if (['tall', 'container', 'temple'].includes(kind)) { // ice blocks
       const s = 0.9, nx = Math.max(1, Math.round(K.w / s)), nz = Math.max(1, Math.round(K.d / s)), ny = Math.max(1, Math.round(K.h / s));
       for (let y = 0; y < ny; y++) for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++)
@@ -595,9 +595,10 @@ const STYLES = {
   junk(kind, K, kit) {
     if (kind === 'container') containerBox(kit, K, 0x8a4b2a);
     else if (kind === 'snake') { // culvert pipe
-      kit.add(MT.rust(), G.cyl, 0, 0.44, 0, 0.44, K.w - 0.2, 0.44, 0, 0, PI / 2);
-      for (const s of [-1, 1]) kit.add(MT.bore(), G.cyl, s * (K.w / 2 - 0.09), 0.44, 0, 0.36, 0.01, 0.36, 0, 0, PI / 2);
-      for (let i = 1; i < 6; i++) kit.add(MT.metalDark(), G.cylLo, -K.w / 2 + 0.1 + (K.w - 0.2) * i / 6, 0.44, 0, 0.455, 0.06, 0.455, 0, 0, PI / 2);
+      const r = K.h / 2;
+      kit.add(MT.rust(), G.cyl, 0, r, 0, r, K.w - 0.2, r, 0, 0, PI / 2);
+      for (const s of [-1, 1]) kit.add(MT.bore(), G.cyl, s * (K.w / 2 - 0.09), r, 0, r - 0.08, 0.01, r - 0.08, 0, 0, PI / 2);
+      for (let i = 1; i < 6; i++) kit.add(MT.metalDark(), G.cylLo, -K.w / 2 + 0.1 + (K.w - 0.2) * i / 6, r, 0, r + 0.015, 0.06, r + 0.015, 0, 0, PI / 2);
     } else if (['tall', 'temple'].includes(kind)) crateStack(kit, K, [MT.crate()]);
     else if (K.t === 'b') { // pallet stacks
       alongLong(K, ({ L, D, at, ry }) => {
