@@ -120,6 +120,8 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 - `src/net.js`: peer-to-peer rooms (host, join, messages)
 - `src/marker.js`: the procedural paintball markers (Tourney, Autococker with cycling back block, pump, milsim) and hoppers
 
+Bots fight from cover: they sprint from bunker to bunker toward the enemy (or the objective), picking bunkers that hide them from the nearest threat and that teammates aren't already using. At each bunker they duck, then peek out to shoot (leaning round tall bunkers, standing up over low ones), and move up again after a few seconds, sooner if nobody is in sight. If they're flanked, they relocate. After 40 s in Elimination they push in harder.
+
 Players are jointed procedural models (hips, knees, ankles, spine, head, and arms posed with two-bone IK onto the marker's grips) with a walk/run cycle, a real crouch, dive, lean, breathing and a hands-up pose when tagged. All models are generated in code; nothing is downloaded.
 
 Every push to `main` redeploys the site on GitHub Pages within about a minute.

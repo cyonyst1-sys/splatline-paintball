@@ -349,7 +349,7 @@ function freshLife(p) {
   p.pitch = 0; p.diveT = 0; p.diveCd = 0; p.queued = 0; p.crouchOn = false; p.lean = 0;
   p.alive = true; p.crouch = false; p.ammo = p.mag; p.reload = 0; p.cd = 0;
   p.vx = p.vz = p.mvx = p.mvz = 0; p.tx = undefined;
-  p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z; p.path = null; p.flankDone = false;
+  p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z; p.path = null; p.flankDone = false; p.cv = null; p.cvLean = 0;
   p.lane = [-1, -0.45, 0, 0.45, 1][(Math.random() * 5) | 0];
   p.hold = Math.random() < 0.5; p.avoid = Math.random() < 0.5 ? 1 : -1;
   reviveModel(p);
@@ -614,26 +614,123 @@ function humanFire(p) {
 }
 
 // ---------- bots ----------
-function pickGoal(b, foes) {
+// Bots fight from cover: they bound from bunker to bunker toward the enemy (or the objective), then hold each
+// bunker for a few seconds, ducking behind it and peeking out (leaning round tall bunkers, standing up over
+// low ones) to trade paint, before sprinting to the next one.
+function nearestFoe(b, foes) {
   let near = null, nd = 1e9;
   for (const f of foes) { const d = Math.hypot(f.x - b.x, f.z - b.z); if (d < nd) { nd = d; near = f; } }
-  const taken = players.filter((o) => o !== b && o.alive && o.goal).map((o) => o.goal);
+  return near;
+}
+// the next bunker to run to: closer to `target`, within `step` metres, hidden from the threat, not a teammate's
+function pickCover(b, target, threat, o, relax) {
+  const fd = Math.hypot(target.x - b.x, target.z - b.z);
+  const taken = players.filter((q) => q !== b && q.alive && q.team === b.team && q.cv && q.cv.spot).map((q) => q.cv.spot);
+  const minProg = relax ? -3 : Math.min(1.5, fd * 0.3);
   const cands = [];
   for (const c of world.cover) {
-    if (taken.some((g) => Math.hypot(g.x - c.x, g.z - c.z) < 1.2)) continue;
-    let s = Math.random() * 5 - Math.hypot(c.x - b.x, c.z - b.z) * 0.25;
-    if (near) s -= Math.abs(Math.hypot(near.x - c.x, near.z - c.z) - 15);
-    cands.push({ c, s });
+    const dB = Math.hypot(c.x - b.x, c.z - b.z);
+    if (dB < 1.5 || dB > o.step) continue;
+    if (taken.some((g) => Math.hypot(g.x - c.x, g.z - c.z) < 1.8)) continue;
+    const prog = fd - Math.hypot(target.x - c.x, target.z - c.z);
+    if (prog < minProg) continue;
+    cands.push({ c, s: prog - dB * 0.3 + Math.random() * 3 });
   }
   cands.sort((a, b2) => b2.s - a.s);
-  let best = null, bestS = -1e9;
-  for (const { c, s } of cands.slice(0, 12)) {
+  let best = null, bs = -1e9;
+  for (const { c, s } of cands.slice(0, 10)) {
     let sc = s;
-    if (near && !losClear(near.x, eyeY(near), near.z, c.x, 1.3, c.z)) sc += 8;
-    if (sc > bestS) { bestS = sc; best = c; }
+    if (threat) {
+      const ty = eyeY(threat), dT = Math.hypot(threat.x - c.x, threat.z - c.z);
+      if (losClear(threat.x, ty, threat.z, c.x, 1.0, c.z)) sc -= 14;           // can't even hide crouched here
+      else if (!losClear(threat.x, ty, threat.z, c.x, 1.55, c.z)) sc += 2;     // hides you standing up too
+      if (dT < 5) sc -= 8;
+      if (o.keepAway && dT < o.keepAway) sc -= 10;
+    }
+    if (sc > bs) { bs = sc; best = c; }
   }
-  b.goal = best ? { x: best.x, z: best.z } : { x: rand(-5, 5), z: rand(-10, 10) };
-  b.goalT = rand(4, 8);
+  return best;
+}
+// eye position when leaning to `side` (+1 right, -1 left) while facing `ang`
+const leanEye = (b, side, ang) => ({ x: b.x - Math.sin(ang) * side * LEAN_DIST, z: b.z + Math.cos(ang) * side * LEAN_DIST });
+// o: { hold: [min, max] seconds per bunker, step: max bound length, push: walk straight at the target when
+//      no cover is left, keepAway: avoid bunkers closer than this to the enemy, fixed: a spot to hold }
+function coverAdvance(b, dt, D, target, foes, o) {
+  const cv = b.cv || (b.cv = { mode: 'pick', t: 0 });
+  const threat = b.tgt || nearestFoe(b, foes);
+  cv.quiet = b.tgt ? 0 : (cv.quiet || 0) + dt;
+  // nobody in sight for a while: don't sit around, keep moving up
+  cv.t -= cv.mode === 'cover' && cv.quiet > 1.5 ? dt * (gameMode === 'koth' ? 20 : 3) : dt;
+  if (cv.mode === 'pick') {
+    cv.spot = o.fixed ? { x: o.fixed.x, z: o.fixed.z } : pickCover(b, target, threat, o, false) || (o.push ? null : pickCover(b, target, threat, o, true));
+    cv.open = false;
+    if (!cv.spot && !o.push) { cv.spot = { x: b.x, z: b.z }; cv.open = true; } // nowhere better: stay and fight from here
+    cv.mode = 'move'; cv.t = 7; b.stuckT = 0; b.lx = b.x; b.lz = b.z;
+  }
+  if (cv.mode === 'move') {
+    const goal = cv.spot || target, d = Math.hypot(goal.x - b.x, goal.z - b.z);
+    if (d < (cv.spot ? 0.45 : 1.5)) {
+      if (!cv.spot) { cv.mode = 'pick'; return; }
+      cv.mode = 'cover'; cv.t = rand(o.hold[0], o.hold[1]); cv.peek = false; cv.peekT = rand(0.2, 0.6); cv.check = 0; cv.lowOk = cv.highOk = true;
+    } else {
+      // sprint between bunkers; shoot on the run if someone's in view
+      const a = followPath(b, goal, D.speed * (b.tgt ? 0.95 : 1.1), dt);
+      if (!b.tgt) b.ang += angDiff(d < 2.5 && threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : a, b.ang) * Math.min(1, dt * 6);
+      b.stuckT += dt;
+      if (b.stuckT > 0.9) {
+        if (Math.hypot(b.x - b.lx, b.z - b.lz) < 0.4) { b.avoid = -b.avoid; b.path = null; if (!o.fixed) cv.mode = 'pick'; }
+        b.stuckT = 0; b.lx = b.x; b.lz = b.z;
+      }
+      if (cv.t <= 0 && !o.fixed) cv.mode = 'pick';
+      return;
+    }
+  }
+  // ---- in cover ----
+  const ta = threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : b.ang;
+  if (!b.tgt) b.ang += angDiff(ta, b.ang) * Math.min(1, dt * 5);
+  cv.check -= dt;
+  if (threat && cv.check <= 0) {
+    cv.check = 0.5;
+    const ty = eyeY(threat);
+    cv.lowOk = !losClear(threat.x, ty, threat.z, b.x, 1.0, b.z);   // hidden when crouched
+    cv.highOk = !losClear(threat.x, ty, threat.z, b.x, 1.55, b.z); // hidden standing
+  }
+  // flanked: this bunker no longer hides us from them, so find one that does (fighting on the way)
+  if (threat && !cv.lowOk && !o.fixed) {
+    if (!cv.open) { cv.mode = 'pick'; return; }
+    if (b.tgt) { // caught in the open: strafe while shooting
+      b.strafeT -= dt;
+      if (b.strafeT <= 0) { b.strafe = -b.strafe; b.strafeT = rand(0.5, 1.4); }
+      const perp = ta + Math.PI / 2 * b.strafe;
+      move(b, Math.cos(perp) * D.speed * 0.75 * dt, Math.sin(perp) * D.speed * 0.75 * dt, true);
+      if (cv.t <= 0) cv.mode = 'pick';
+      return;
+    }
+  }
+  cv.peekT -= dt;
+  if (b.reload > 0) cv.peek = false;
+  else if (cv.peekT <= 0) {
+    if (cv.peek) {
+      // stay out while trading paint, but not forever
+      if (b.tgt && b.ammo > 0 && cv.peekLen < 2.6) { cv.peekT = 0.3; cv.peekLen += 0.3; }
+      else { cv.peek = false; cv.peekT = rand(0.6, 1.5); }
+    } else {
+      cv.peek = true; cv.peekT = cv.peekLen = rand(0.8, 1.6);
+      if (!cv.highOk) cv.side = 0; // low bunker: pop up over the top
+      else {                       // tall bunker: lean out the side that has a view of them
+        const sides = Math.random() < 0.5 ? [1, -1] : [-1, 1];
+        cv.side = sides[0];
+        if (threat) for (const s of sides) {
+          const e = leanEye(b, s, ta);
+          if (losClear(e.x, (b.y || 0) + H_STAND * 0.9 - 0.05, e.z, threat.x, chestY(threat), threat.z)) { cv.side = s; break; }
+        }
+      }
+    }
+  }
+  b.cvLean = cv.peek ? cv.side : 0;
+  b.cvCrouch = !cv.peek && !cv.highOk;
+  // time to move up (only once ducked back in)
+  if (cv.t <= 0 && !cv.peek && !o.fixed) cv.mode = 'pick';
 }
 function steer(b, tx, tz, speed, dt, careful = true) {
   let a = Math.atan2(tz - b.z, tx - b.x);
@@ -699,6 +796,7 @@ function updateBot(b, dt) {
   const D = DIFF[matchDiff];
   const foes = players.filter((p) => p.alive && p.team !== b.team && p.protect <= 0);
   const obj = respawnMode() ? objectiveFor(b) : null;
+  const me = leanOffset(b);
   b.scanT -= dt;
   if (b.tgt && (!b.tgt.alive || b.tgt.protect > 0)) b.tgt = null;
   if (b.scanT <= 0) {
@@ -708,7 +806,7 @@ function updateBot(b, dt) {
     for (const f of foes) {
       const d = Math.hypot(f.x - b.x, f.z - b.z);
       const lo = leanOffset(f, 0.8);
-      if (d < sight && d < bd && losClear(b.x, eyeY(b), b.z, f.x + lo.x, chestY(f), f.z + lo.z)) { best = f; bd = d; }
+      if (d < sight && d < bd && losClear(b.x + me.x, eyeY(b), b.z + me.z, f.x + lo.x, chestY(f), f.z + lo.z)) { best = f; bd = d; }
     }
     if (best !== b.tgt) b.seen = 0;
     b.tgt = best; b.td = bd;
@@ -716,15 +814,16 @@ function updateBot(b, dt) {
   if (b.ammo < b.mag && b.reload <= 0 && (b.ammo === 0 || (!b.tgt && b.ammo < 8))) startReload(b);
   // castle defenders behind a parapet fight crouched: eyes over the wall, body behind it
   const hunker = gameMode === 'koth' && b.spot && b.spot.hunker && b.team !== attackers() && b.y > 0.6 && dist(b, b.spot) < 2;
-  b.crouch = b.reload > 0 || hunker;
+  b.cvLean = 0; b.cvCrouch = false;
 
+  let want = b.ang;
   if (b.tgt) {
     const t = b.tgt, td = Math.hypot(t.x - b.x, t.z - b.z);
     b.seen += dt;
     const ft = td / b.ballSpeed;
     const tl = leanOffset(t, 0.8);
     const px = t.x + tl.x + t.vx * ft * D.lead, pz = t.z + tl.z + t.vz * ft * D.lead;
-    const want = Math.atan2(pz - b.z, px - b.x);
+    want = Math.atan2(pz - b.z, px - b.x);
     const da = angDiff(want, b.ang);
     b.ang += da * Math.min(1, dt * 9);
     const muzzleY = eyeY(b) - 0.25;
@@ -737,13 +836,40 @@ function updateBot(b, dt) {
       const err = D.err * (1 + Math.max(0, td - 12) / 20) * (castleDef ? 0.85 : respawnMode() ? 1.35 : 1);
       const yaw = b.ang + gauss() * err, pitch = b.pitch + gauss() * err * 0.6;
       const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
-      const pos = new THREE.Vector3(b.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + Math.sin(b.ang) * 0.55);
+      const pos = new THREE.Vector3(b.x + me.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + me.z + Math.sin(b.ang) * 0.55);
       fire(b, pos, dir.multiplyScalar(b.ballSpeed));
       b.cd = D.rate * rand(0.8, 1.4);
     }
-    if (obj && obj.rush && !obj.hold) {
-      // keep pushing toward the objective, zig-zagging to be harder to hit
-      // flag carriers just sprint home
+  } else { b.seen = 0; b.pitch *= 0.9; }
+
+  botMove(b, dt, D, obj, foes, want);
+  b.crouch = b.reload > 0 || hunker || b.cvCrouch;
+  b.lean += (b.cvLean - b.lean) * Math.min(1, dt * 8);
+}
+function botMove(b, dt, D, obj, foes, want) {
+  if (obj) {
+    const ground = (b.y || 0) < 0.6;
+    if (!obj.carry && !obj.drop && ground) {
+      // CTF defenders hold a bunker near their flag and peek from it
+      if (obj.hold && gameMode === 'ctf') return coverAdvance(b, dt, D, obj, foes, { fixed: obj, hold: [1e9, 1e9], step: 30 });
+      // attackers bound up from cover to cover until they're close, then rush in
+      // (castle attackers only cross the open field this way; inside the walls they storm the keep)
+      if (!obj.hold && dist(b, obj) > 8 && (gameMode === 'ctf' || !obj.rush)) return coverAdvance(b, dt, D, obj, foes, { hold: obj.rush || gameMode === 'koth' ? [0.4, 1.2] : [1, 2.4], step: 14, push: true });
+    }
+    b.cv = null;
+    return objectiveMove(b, dt, D, obj, want);
+  }
+  if (!foes.length) return;
+  // Elimination: work up the field toward the nearest opponent; after a while, push in harder
+  const hunt = roundTime > HUNT_AFTER;
+  coverAdvance(b, dt, D, nearestFoe(b, foes), foes, { hold: hunt ? [0.6, 1.5] : [2, 4.5], step: hunt ? 14 : 11, keepAway: hunt ? 0 : 8, push: hunt });
+}
+// close-in objective play: grabbing flags, running them home, taking or defending the throne room
+function objectiveMove(b, dt, D, obj, want) {
+  if (b.tgt) {
+    const td = Math.hypot(b.tgt.x - b.x, b.tgt.z - b.z);
+    if (obj.rush && !obj.hold) {
+      // keep pushing toward the objective, zig-zagging to be harder to hit; flag carriers just sprint home
       const a = followPath(b, obj, D.speed * (obj.carry ? 1.25 : 1.0), dt);
       if (!obj.carry) {
         b.strafeT -= dt;
@@ -751,61 +877,32 @@ function updateBot(b, dt) {
         const w = D.speed * 0.55 * b.strafe;
         move(b, -Math.sin(a) * w * dt, Math.cos(a) * w * dt, true);
       }
-    }
-    else if (obj && obj.hold && b.y > 0.6) { /* hold the firing position */ }
+    } else if (obj.hold && b.y > 0.6) { /* hold the firing position */ }
     else {
       b.strafeT -= dt;
       if (b.strafeT <= 0) { b.strafe = -b.strafe; b.strafeT = rand(0.5, 1.4); }
       const perp = want + Math.PI / 2 * b.strafe;
       let sx = Math.cos(perp), sz = Math.sin(perp);
       if (td < 7) { sx -= Math.cos(want) * 0.8; sz -= Math.sin(want) * 0.8; }
-      if (b.reload > 0 && b.goal && !obj) followPath(b, b.goal, D.speed * 0.6, dt);
-      else { const sp = (b.hold || (obj && obj.hold)) ? D.speed * 0.4 : D.speed * 0.75; move(b, sx * sp * dt, sz * sp * dt, true); }
+      const sp = obj.hold ? D.speed * 0.4 : D.speed * 0.75;
+      move(b, sx * sp * dt, sz * sp * dt, true);
     }
     return;
   }
-  b.seen = 0; b.pitch *= 0.9;
-  if (obj) {
-    const d = dist(b, obj);
-    if (d > (obj.hold ? 0.5 : 1.2)) {
-      const a = followPath(b, obj, obj.hold && d < 3 ? D.speed * 0.5 : obj.carry ? D.speed * 1.3 : obj.rush ? D.speed * 1.15 : D.speed, dt);
-      b.ang += angDiff(a, b.ang) * Math.min(1, dt * 6);
-      // not getting anywhere? re-plan and try the other way round
-      b.stuckT += dt;
-      if (b.stuckT > 1.2) {
-        if (Math.hypot(b.x - b.lx, b.z - b.lz) < 0.5) { b.path = null; b.avoid = -b.avoid; b.flankDone = true; }
-        b.stuckT = 0; b.lx = b.x; b.lz = b.z;
-      }
-    } else {
-      // look toward where enemies will come from
-      const lookX = gameMode === 'koth' && b.team !== attackers() ? -1 : (b.team ? -1 : 1);
-      b.ang += angDiff(lookX > 0 ? 0 : Math.PI, b.ang) * Math.min(1, dt * 3);
-    }
-    return;
-  }
-  if (!foes.length) return;
-  b.goalT -= dt;
-  if (roundTime > HUNT_AFTER) {
-    if (!b.goal || b.goalT <= 0 || !b.hunting) {
-      let near = foes[0], nd = 1e9;
-      for (const f of foes) { const dd = Math.hypot(f.x - b.x, f.z - b.z); if (dd < nd) { nd = dd; near = f; } }
-      b.goal = { x: near.x, z: near.z }; b.goalT = 1.5; b.hunting = true;
-    }
-  } else if (!b.goal || b.goalT <= 0) { b.hunting = false; pickGoal(b, foes); }
-  const d = Math.hypot(b.goal.x - b.x, b.goal.z - b.z);
-  if (d > 0.3) {
-    const a = followPath(b, b.goal, b.crouch ? D.speed * 0.6 : D.speed, dt);
+  const d = dist(b, obj);
+  if (d > (obj.hold ? 0.5 : 1.2)) {
+    const a = followPath(b, obj, obj.hold && d < 3 ? D.speed * 0.5 : obj.carry ? D.speed * 1.3 : obj.rush ? D.speed * 1.15 : D.speed, dt);
     b.ang += angDiff(a, b.ang) * Math.min(1, dt * 6);
+    // not getting anywhere? re-plan and try the other way round
+    b.stuckT += dt;
+    if (b.stuckT > 1.2) {
+      if (Math.hypot(b.x - b.lx, b.z - b.lz) < 0.5) { b.path = null; b.avoid = -b.avoid; b.flankDone = true; }
+      b.stuckT = 0; b.lx = b.x; b.lz = b.z;
+    }
   } else {
-    let near = foes[0], nd = 1e9;
-    for (const f of foes) { const dd = Math.hypot(f.x - b.x, f.z - b.z); if (dd < nd) { nd = dd; near = f; } }
-    b.ang += angDiff(Math.atan2(near.z - b.z, near.x - b.x), b.ang) * Math.min(1, dt * 4);
-    if (Math.random() < dt * 0.25 && roundTime <= HUNT_AFTER) pickGoal(b, foes);
-  }
-  b.stuckT += dt;
-  if (b.stuckT > 0.8) {
-    if (d > 0.8 && Math.hypot(b.x - b.lx, b.z - b.lz) < 0.4) { b.avoid = -b.avoid; b.path = null; pickGoal(b, foes); }
-    b.stuckT = 0; b.lx = b.x; b.lz = b.z;
+    // look toward where enemies will come from
+    const lookX = gameMode === 'koth' && b.team !== attackers() ? -1 : (b.team ? -1 : 1);
+    b.ang += angDiff(lookX > 0 ? 0 : Math.PI, b.ang) * Math.min(1, dt * 3);
   }
 }
 
