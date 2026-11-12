@@ -118,11 +118,11 @@ function jerseyMat(team, pattern) {
   g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(0, 246, 256, 10);     // hem
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   // a soft glow so the team colour still pops in shade and at a distance
-  return (jerseyCache[key] = new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.4 }));
+  return (jerseyCache[key] = new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: TEAMS[team].glow }));
 }
-const sleeveMat = TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.8, emissive: t.color, emissiveIntensity: 0.4 }));
+const sleeveMat = TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.8, emissive: t.color, emissiveIntensity: t.glow }));
 // team-coloured pants (a deeper shade of the jersey), so the whole body reads as the team colour
-const pantsMat = TEAMS.map((t) => { const c = new THREE.Color(t.color).lerp(new THREE.Color(0x15171c), 0.35); return new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, emissive: c, emissiveIntensity: 0.25 }); });
+const pantsMat = TEAMS.map((t) => { const c = new THREE.Color(t.color).lerp(new THREE.Color(0x15171c), 0.35); return new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, emissive: c, emissiveIntensity: t.glow * 0.6 }); });
 function maskMats(id) {
   if (maskCache[id]) return maskCache[id];
   const it = ITEMS.mask[id] || ITEMS.mask.black;
@@ -301,7 +301,7 @@ const elimLike = () => gameMode === 'elim' || gameMode === 'battle';
 const respawnMode = () => !elimLike();
 // bot names: the six per team, then numbered call signs for big teams (Ace, Jet, … Ace-2, Jet-2, …)
 const botName = (team, i) => { const n = TEAMS[team].names; return i < n.length ? n[i] : `${n[i % n.length]}-${((i / n.length) | 0) + 1}`; };
-const attackers = () => (round % 2 === 1 ? 0 : 1); // King of the Castle: blue attacks in round 1, red in round 2
+const attackers = () => (round % 2 === 1 ? 0 : 1); // King of the Castle: blue attacks in round 1, yellow in round 2
 
 // ---------- maps & modes ----------
 let currentMap = null, currentMode = null;
@@ -2123,8 +2123,8 @@ function renderLobby() {
     + `<button data-acc="${esc(q.id)}">Accept</button><button class="deny" data-deny="${esc(q.id)}">Deny</button></div>`).join('');
   const bots = n * 2 - lobby.players.length;
   $('lobbyBots').textContent = lobby.mode === 'coop'
-    ? `Co-op: all players on Blue against ${n} Red bots${lobby.players.length < n ? `, with ${n - lobby.players.length} Blue bot${n - lobby.players.length === 1 ? '' : 's'} helping` : ''}.`
-    : `Teams: players split between Blue and Red (${n} v ${n}). ${Math.max(0, bots)} bot${bots === 1 ? '' : 's'} fill the empty slots.`;
+    ? `Co-op: all players on Blue against ${n} Yellow bots${lobby.players.length < n ? `, with ${n - lobby.players.length} Blue bot${n - lobby.players.length === 1 ? '' : 's'} helping` : ''}.`
+    : `Teams: players split between Blue and Yellow (${n} v ${n}). ${Math.max(0, bots)} bot${bots === 1 ? '' : 's'} fill the empty slots.`;
   for (const b of document.querySelectorAll('#lobbyMode button')) { b.classList.toggle('on', b.dataset.m === lobby.mode); b.disabled = !isHost; }
   for (const b of document.querySelectorAll('#lobbyGame button')) { b.classList.toggle('on', b.dataset.g === lobby.game); b.disabled = !isHost; }
   $('btnStart').classList.toggle('hidden', !isHost);

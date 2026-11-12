@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const ANO = [0x2a6cff, 0xff2b4a];   // anodised body colour per team
-const PAINT = [0x1ec8ff, 0xff2d8a];  // paint colour per team
+const PAINT = [0x1ec8ff, 0xffc400];  // paint colour per team
 const V2 = (x, y) => new THREE.Vector2(x, y);
 const PI = Math.PI;
 
@@ -298,7 +298,7 @@ function hopper(root, M, hi, type, feed, s, shellKey) {
 
 /**
  * Build a marker.
- * @param {number} team 0 blue, 1 red
+ * @param {number} team 0 blue, 1 yellow
  * @param {{type?: string, hopperType?: string, shell?: string, detail?: 'high'|'low', barrel?: number, hopperLvl?: number, tank?: number}} o
  */
 export function makeMarker(team, o = {}) {

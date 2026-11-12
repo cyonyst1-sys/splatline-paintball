@@ -10,8 +10,8 @@ export const FIELD = { hw: 25, hd: 15 };     // playing field half-size (metres)
 export const BOUND = { hw: 26.3, hd: 16.3 }; // where players can walk
 export const NETB = { hw: 27.5, hd: 17.5 };  // netting
 export const TEAMS = [
-  { name: 'BLUE', css: '#2ee8ff', paintCss: '#1ec8ff', color: 0x2ee8ff, paint: 0x1ec8ff, names: ['Ace', 'Jet', 'Moss', 'Dash', 'Nova', 'Bolt'] },
-  { name: 'RED', css: '#ff2f9e', paintCss: '#ff2d8a', color: 0xff2f9e, paint: 0xff2d8a, names: ['Viper', 'Rook', 'Blaze', 'Fang', 'Hex', 'Grit'] },
+  { name: 'BLUE', css: '#2ee8ff', paintCss: '#1ec8ff', color: 0x2ee8ff, glow: 0.4, paint: 0x1ec8ff, names: ['Ace', 'Jet', 'Moss', 'Dash', 'Nova', 'Bolt'] },
+  { name: 'YELLOW', css: '#ffe81a', paintCss: '#ffc400', color: 0xffcc00, glow: 0.12, paint: 0xffc400, names: ['Viper', 'Rook', 'Blaze', 'Fang', 'Hex', 'Grit'] },
 ];
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -376,7 +376,7 @@ export function createWorld(canvas, high) {
       b.userData.own = true; b.position.set(x, 1.25, z); b.rotation.y = ry; venue.add(b);
     };
     banner('BLUE BASE', '#1f5fd6', '#ffffff', -NETB.hw + 0.06, 0, Math.PI / 2, 8);
-    banner('RED BASE', '#d42a43', '#ffffff', NETB.hw - 0.06, 0, -Math.PI / 2, 8);
+    banner('YELLOW BASE', '#f2c400', '#141414', NETB.hw - 0.06, 0, -Math.PI / 2, 8);
     const bx = FIELD.hw > 30 ? [-36, -12, 12, 36] : [-16, 0, 16];
     bx.forEach((x, i) => {
       const mid = i === Math.floor(bx.length / 2) && bx.length % 2;

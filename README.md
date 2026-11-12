@@ -2,7 +2,7 @@
 
 A first-person 3D paintball game that runs in the browser. Built with [three.js](https://threejs.org/) (loaded from a CDN), no build step.
 
-You play on Blue with three bot teammates against four Red bots on an outdoor field of inflatable bunkers. One hit and you're out; the first team to win 3 rounds takes the match.
+You play on Blue with three bot teammates against four Yellow bots on an outdoor field of inflatable bunkers. One hit and you're out; the first team to win 3 rounds takes the match.
 
 **Play:** https://cyonyst1-sys.github.io/splatline-paintball/
 
@@ -25,7 +25,7 @@ You play on Blue with three bot teammates against four Red bots on an outdoor fi
 Click **Multiplayer** on the home screen.
 
 - **Open rooms:** the Multiplayer screen shows a live list of rooms that are online right now: the host's name, game mode, Teams or Co-op, map, players (e.g. 3/8), and whether a match is already running. Press **Ask to join** on one.
-- **Host:** pick *Teams* (players split Blue vs Red) or *Co-op* (everyone on Blue vs bots), then **Create room**. Your room appears in everyone's open rooms list (untick *Show my room in the open rooms list* to keep it private and share the 5-character code or invite link instead).
+- **Host:** pick *Teams* (players split Blue vs Yellow) or *Co-op* (everyone on Blue vs bots), then **Create room**. Your room appears in everyone's open rooms list (untick *Show my room in the open rooms list* to keep it private and share the 5-character code or invite link instead).
 - **Requests:** when someone asks to join, the host gets a notice and an **Accept** / **Deny** row in the lobby. Accepted players enter the lobby; denied players go back to the room list. The host presses **Start match** whenever the lobby has as many people as they want; anyone still waiting is turned away for that match.
 - **Join with a code:** enter the code (or open the invite link) and press **Ask to join**. The host still has to accept.
 - The room list has no server either: one browser on the Multiplayer screen keeps the list (over PeerJS) and, if it leaves, another takes over automatically within a few seconds. Room names show the host's chosen player name.
@@ -146,7 +146,7 @@ In Elimination each bot has a role. Off the break, each one runs to its first bu
 
 Roles are reassigned whenever someone is tagged, based on the numbers: even teams play back/snake/mid/front; a team down a player plays back and mids; up by 2 or more it pushes with front players; down by 2 or more (or alone against several) it anchors and makes the other team come to it. After 40 s nobody turtles, and after 60 s everyone pushes.
 
-Team colours are neon (electric light blue and hot pink) with a soft glow, on the jersey, sleeves and pants, so players stand out from the field, the trees and the bunkers at any distance. Far from the camera a player keeps the full model; only the marker is merged into one piece and tiny details (pods, straps) are skipped.
+The teams are Blue and Yellow, in neon colours (electric light blue and neon yellow) with a soft glow, on the jersey, sleeves and pants, so players stand out from the field, the trees and the bunkers at any distance. Far from the camera a player keeps the full model; only the marker is merged into one piece and tiny details (pods, straps) are skipped.
 
 Players are jointed procedural models (hips, knees, ankles, spine, head, and arms posed with two-bone IK onto the marker's grips) with a walk/run cycle, a real crouch, dive, lean, breathing and a hands-up pose when tagged. All models are generated in code; nothing is downloaded.
 
