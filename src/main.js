@@ -17,7 +17,7 @@ const stubs = {};
 const $ = (id) => document.getElementById(id)
   || stubs[id] || (console.warn(`index.html has no #${id} (stale page?)`), stubs[id] = document.createElement('div'));
 // multiplayer protocol version: players on different versions can't share a room
-const PROTO = 3;
+const PROTO = 4;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -44,7 +44,7 @@ export const MODES = {
   elim: { name: 'Elimination', desc: "One hit and you're out. First team to win 3 rounds.", teamSize: 4 },
   ctf: { name: 'Capture the Flag', desc: 'Infinite respawns. Bring their flag to yours. First to 3 captures, or most in 6 min.', teamSize: 6 },
   koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 4 lives each. Hold the throne room to win.', teamSize: 6 },
-  battle: { name: 'Battle', desc: '32 v 32 on a huge field. One life each: the last team with anyone standing wins.', teamSize: 32 },
+  battle: { name: 'Battle', desc: '20 v 20 in a forest of treehouses and catwalks. One life each: the last team with anyone standing wins.', teamSize: 20 },
 };
 const CTF = { caps: 3, time: 360, returnT: 20, pickR: 1.4, capR: 2.6 };
 // attackRespawn: attackers wait longer than defenders, which gives the castle time to regroup
@@ -361,7 +361,7 @@ function freshLife(p) {
   p.alive = true; p.crouch = false; p.ammo = p.mag; p.reload = 0; p.cd = 0;
   p.vx = p.vz = p.mvx = p.mvz = 0; p.tx = undefined;
   p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z; p.path = null; p.flankDone = false; p.cv = null; p.cvLean = 0;
-  p.crawl = false; p.erole = null; p.sn = null; p.snakeDone = false; p.lastSeen = null; p.brokeOut = false; p.adv = 0; p.laneP = null;
+  p.crawl = false; p.erole = null; p.sn = null; p.snakeDone = false; p.tw = null; p.towerDone = false; p.lastSeen = null; p.brokeOut = false; p.adv = 0; p.laneP = null;
   p.lane = [-1, -0.45, 0, 0.45, 1][(Math.random() * 5) | 0];
   p.hold = Math.random() < 0.5; p.avoid = Math.random() < 0.5 ? 1 : -1;
   reviveModel(p);
@@ -426,7 +426,7 @@ function losClear(ax, ay, az, bx, by, bz) {
   v1.set(ax, ay, az); v2.set(bx - ax, by - ay, bz - az);
   const len = v2.length(); if (len < 1e-6) return true;
   ray.set(v1, v2.divideScalar(len)); ray.near = 0; ray.far = len;
-  return ray.intersectObjects(world.bunkerMeshes, false).length === 0;
+  return ray.intersectObjects(world.near(ax, az, bx, bz), false).length === 0;
 }
 const eyeY = (p) => (p.y || 0) + p.h * 0.9 - Math.abs(p.lean) * 0.05;
 const chestY = (p) => (p.y || 0) + p.h * 0.72;
@@ -483,7 +483,7 @@ function updateBalls(dt) {
     const seg = v2.copy(b.vel).multiplyScalar(dt), len = seg.length();
     let tBest = Infinity, kind = null, hitP = null, point = null, normal = null;
     ray.set(p0, v3.copy(seg).divideScalar(len)); ray.near = 0; ray.far = len;
-    const hits = ray.intersectObjects(world.bunkerMeshes, false);
+    const hits = ray.intersectObjects(world.near(p0.x, p0.z, p0.x + seg.x, p0.z + seg.z), false);
     if (hits.length) {
       tBest = hits[0].distance / len; kind = 'wall'; point = hits[0].point.clone();
       normal = hits[0].face ? hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld) : v3.clone().negate();
@@ -614,7 +614,7 @@ function humanFire(p) {
   camera.updateMatrixWorld();
   const dir = camera.getWorldDirection(new THREE.Vector3());
   ray.set(camera.position, dir); ray.near = 0; ray.far = 120;
-  const hits = ray.intersectObjects(world.bunkerMeshes, false);
+  const hits = ray.intersectObjects(world.near(camera.position.x, camera.position.z, camera.position.x + dir.x * 120, camera.position.z + dir.z * 120), false);
   let d = hits.length ? hits[0].distance : 120;
   if (dir.y < 0) d = Math.min(d, -camera.position.y / dir.y);
   const aim = camera.position.clone().addScaledVector(dir, Math.max(d, 2));
@@ -804,8 +804,9 @@ const ROLE = {
             budget: 1, breakout: [0.8, 6.5, 9, 0.4] },
   anchor: { hold: [6, 10], step: 7, keepAway: 22, suppress: 0.6, rope: 0.7, dive: 0.15, retreat: true, patient: true },
   snake:  { suppress: 0.3, rope: 0.9 },
+  tower:  { suppress: 0.6, rope: 0.6, lanes: true }, // Battle: climbs a treehouse and holds a window or parapet
 };
-const ROLE_RANK = { front: 0, snake: 1, mid: 2, anchor: 3, back: 4 }; // most advanced bot gets the most forward role
+const ROLE_RANK = { front: 0, snake: 1, mid: 2, tower: 3, anchor: 3, back: 4 }; // most advanced bot gets the most forward role
 const teamPlan = ['even', 'even'];
 let roleT = 0;
 // snakes on a team's own half
@@ -853,10 +854,19 @@ function assignRoles(team) {
     roles = [];
     for (const [r, f] of Object.entries(mix)) for (let k = 0; k < Math.round(n * f); k++) roles.push(r);
     if (plan !== 'defend') for (let k = 0; k < Math.min(3, snakesHere); k++) roles.push('snake');
+    // treehouses (Battle): a few players climb up and hold the windows and parapets
+    const towers = Math.min(towerPosts(team).length, Math.round(n * 0.2));
+    for (let k = 0; k < towers; k++) roles.unshift('tower');
     roles = roles.slice(0, n);
     while (roles.length < n) roles.push('mid');
   }
-  if (late) roles = roles.map((r) => (r === 'back' ? 'mid' : r === 'snake' ? 'snake' : 'front'));
+  if (late) roles = roles.map((r) => (r === 'back' ? 'mid' : r === 'snake' || r === 'tower' ? r : 'front'));
+  // anyone up a treehouse (or on the way up) keeps that role: they have to climb back down first
+  const inTower = mine.filter((b) => b.ctrl === 'bot' && b.erole === 'tower' && b.tw && (b.tw.k > 0 || (b.y || 0) > 0.3));
+  for (let q = roles.filter((r) => r === 'tower').length; q < inTower.length; q++) {
+    const k = ['front', 'mid', 'anchor', 'back', 'snake'].map((r) => roles.indexOf(r)).find((i) => i >= 0);
+    if (k == null) roles.push('tower'); else roles[k] = 'tower';
+  }
   // a human on the team takes one of the slots (a mid if there is one)
   if (mine.some((p) => !(p.ctrl === 'bot'))) { const k = roles.indexOf('mid'); roles.splice(k >= 0 ? k : roles.length - 1, 1); }
   const bots = mine.filter((p) => p.ctrl === 'bot');
@@ -871,7 +881,7 @@ function assignRoles(team) {
   // keep roles that still exist (no pointless reshuffles), then hand out the rest by how far up each bot is
   const pending = [];
   for (const b of bots) {
-    const k = b.erole && !(b.erole === 'snake' && b.snakeDone) ? roles.indexOf(b.erole) : -1;
+    const k = b.erole && !(b.erole === 'snake' && b.snakeDone) && !(b.erole === 'tower' && b.towerDone) ? roles.indexOf(b.erole) : -1;
     if (k >= 0) roles.splice(k, 1); else pending.push(b);
   }
   const side = team ? 1 : -1;
@@ -880,8 +890,9 @@ function assignRoles(team) {
   for (const b of pending) {
     let r = roles.shift() || 'mid';
     if (r === 'snake' && b.snakeDone) r = 'front';
+    if (r === 'tower' && b.towerDone) r = 'mid';
     if (b.erole !== r) {
-      b.erole = r; b.cv = null; b.sn = null; b.crawl = false;
+      b.erole = r; b.cv = null; b.sn = null; b.tw = null; b.crawl = false;
       b.mag = (ROLE[r] && ROLE[r].mag) || BOT.mag;          // back players carry extra pods
       b.ammo = roundTime < 1 ? b.mag : Math.min(b.ammo, b.mag);
     }
@@ -948,6 +959,65 @@ function snakeRole(b, dt, D, foes) {
   const side = threat && Math.abs(((threat.x - b.x) * -sn.back.x + (threat.z - b.z) * -sn.back.z) / Math.max(0.1, dist(b, threat))) < 0.7;
   const exposed = side && dist(b, threat) < 22 && !cv.peek && losClear(threat.x, eyeY(threat), threat.z, b.x, 0.45, b.z);
   if (sn.t <= 0 || exposed) { b.snakeDone = true; b.erole = 'front'; b.sn = null; b.cv = null; b.crawl = false; }
+}
+// tower (Battle): walk to the foot of a treehouse's stairs, climb up to a window or the deck's front parapet,
+// and hold it: crouched behind the wall, standing up to shoot. Climbs back down after a long quiet spell.
+const towerPosts = (team) => (world.info.posts || []).filter((p) => p.team === team);
+function towerRole(b, dt, D, foes) {
+  let tw = b.tw;
+  if (!tw) {
+    const taken = players.filter((q) => q !== b && q.alive && q.tw).map((q) => q.tw.post);
+    let best = null, bs = 1e9;
+    for (const p of towerPosts(b.team)) {
+      if (taken.includes(p) || foes.some((f) => Math.hypot(f.x - p.x, f.z - p.z) < 9)) continue;
+      const s = Math.hypot(p.route[0].x - b.x, p.route[0].z - b.z) + Math.random() * 8;
+      if (s < bs) { bs = s; best = p; }
+    }
+    if (!best) { b.towerDone = true; b.erole = 'mid'; return; }
+    tw = b.tw = { post: best, k: 0, st: 'go', quiet: 0 };
+    b.cv = { mode: 'move', peek: false };
+    b.stuckT = 0; b.lx = b.x; b.lz = b.z;
+  }
+  const R = tw.post.route, cv = b.cv;
+  if (tw.st !== 'hold') {
+    const wp = R[tw.k], d = Math.hypot(wp.x - b.x, wp.z - b.z);
+    if (d < (tw.k === 0 ? 0.8 : 0.3) && Math.abs((b.y || 0) - wp.y) < 0.9) {
+      if (tw.st === 'go' && ++tw.k >= R.length) { tw.st = 'hold'; tw.k = R.length - 1; cv.mode = 'cover'; cv.peek = false; cv.peekT = rand(0.3, 0.8); return; }
+      if (tw.st === 'down' && --tw.k < 0) { b.tw = null; b.towerDone = true; b.erole = 'front'; b.cv = null; return; }
+      return;
+    }
+    let a;
+    if (tw.k === 0 && (b.y || 0) < 0.3) a = followPath(b, wp, D.speed * 1.05, dt); // across the field to the stairs
+    else { a = Math.atan2(wp.z - b.z, wp.x - b.x); const s = Math.min(D.speed * 0.85 * dt, d); move(b, Math.cos(a) * s, Math.sin(a) * s, true); }
+    if (!b.tgt) b.ang += angDiff(a, b.ang) * Math.min(1, dt * 6);
+    b.stuckT += dt;
+    if (b.stuckT > 2) {
+      if (Math.hypot(b.x - b.lx, b.z - b.lz) < 0.3) {
+        if (tw.k === 0 && tw.st === 'go') { b.tw = null; b.towerDone = true; b.erole = 'mid'; b.cv = null; return; } // can't get there: play on the ground
+        if (tw.st === 'go') tw.k = Math.min(R.length - 1, tw.k + 1); else tw.k = Math.max(0, tw.k - 1);
+        b.path = null;
+      }
+      b.stuckT = 0; b.lx = b.x; b.lz = b.z;
+    }
+    return;
+  }
+  // holding: duck behind the parapet / under the window, pop up to shoot and lay lanes
+  tw.quiet = b.tgt ? 0 : tw.quiet + dt;
+  if (!b.tgt) {
+    const threat = nearestFoe(b, foes);
+    b.ang += angDiff(threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : (b.team ? Math.PI : 0), b.ang) * Math.min(1, dt * 4);
+  }
+  cv.mode = 'cover';
+  cv.peekT -= dt;
+  if (b.reload > 0) cv.peek = false;
+  else if (cv.peekT <= 0) {
+    if (cv.peek && b.tgt && b.ammo > 0 && cv.peekLen < 3) { cv.peekT = 0.3; cv.peekLen += 0.3; }
+    else if (cv.peek) { cv.peek = false; cv.peekT = rand(0.7, 1.6); }
+    else { cv.peek = true; cv.peekT = cv.peekLen = rand(1.5, 3); cv.supp = Math.random() < ROLE.tower.suppress; }
+  }
+  b.cvCrouch = !cv.peek;
+  // nothing to shoot at for a long time (or the round's dragging on): climb down and go hunting
+  if (tw.quiet > 50 || (lateRound() && tw.quiet > 15)) { tw.st = 'down'; cv.mode = 'move'; cv.peek = false; b.stuckT = 0; b.lx = b.x; b.lz = b.z; }
 }
 function steer(b, tx, tz, speed, dt, careful = true) {
   let a = Math.atan2(tz - b.z, tx - b.x);
@@ -1103,7 +1173,7 @@ function laneFire(b, D, R, me, dt) {
     for (let k = 0; k < 10 && !best && world.cover.length; k++) {
       const c = world.cover[(Math.random() * world.cover.length) | 0];
       const u = -c.x * side;                                // metres into their half
-      if (u < 0.5 || u > 21) continue;
+      if (u < 0.5 || u > 21 * FIELD.hw / 25) continue;
       const d = Math.hypot(c.x - b.x, c.z - b.z);
       if (d > D.sight || d < 8) continue;
       const px = c.x + (b.x - c.x) / d * 1.3, pz = c.z + (b.z - c.z) / d * 1.3; // just in front of that bunker
@@ -1147,6 +1217,7 @@ function botMove(b, dt, D, obj, foes, want) {
   // Elimination: play your role (see assignRoles)
   const role = b.erole || 'mid';
   if (role === 'snake') return snakeRole(b, dt, D, foes);
+  if (role === 'tower') return towerRole(b, dt, D, foes);
   b.crawl = false;
   const R = roleParams(role);
   // anchors fall back toward their own base; everyone else works toward the nearest opponent
@@ -1968,7 +2039,7 @@ function renderHud() {
   $('clickPlay').classList.toggle('hidden', !(inGame() && !locked && !fallbackLook && !localPaused));
   let banner = '';
   if (state === 'countdown') {
-    const title = gameMode === 'battle' ? 'BATTLE · 32 v 32' : gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? 'CAPTURE THE FLAG'
+    const title = gameMode === 'battle' ? 'BATTLE · 20 v 20' : gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? 'CAPTURE THE FLAG'
       : `ROUND ${round} · <span style="color:${TEAMS[attackers()].css}">${TEAMS[attackers()].name} ATTACKS</span>`;
     const sub = gameMode === 'battle' ? '<em>One life each. Last team standing wins.</em>' : gameMode === 'koth' ? `<em>${h.team === attackers() ? 'Take the throne room in the keep' : `Defend the castle · ${KOTH.lives} lives`}</em>` : '';
     banner = `${title}${sub}<small>${Math.ceil(timer)}</small>`;

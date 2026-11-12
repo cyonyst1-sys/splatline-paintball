@@ -2,7 +2,8 @@
 // bot pathfinding, paint decals.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { KINDS, buildBunker, mapById, castlePlan, buildCastlePart } from './maps.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { KINDS, buildBunker, mapById, castlePlan, buildCastlePart, buildForestPart } from './maps.js';
 
 // Field sizes change per map, so these objects are updated in place by loadMap.
 export const FIELD = { hw: 25, hd: 15 };     // playing field half-size (metres)
@@ -451,7 +452,7 @@ export function createWorld(canvas, high) {
     t: (K) => new THREE.CylinderGeometry(K.R, K.R, K.h, 3).rotateY(Math.PI / 2).translate(0, K.h / 2, 0),
   };
   let groundTex = [];
-  const info = { map: null, mode: 'elim', flags: null, castle: null, large: false, snakes: [] };
+  const info = { map: null, mode: 'elim', flags: null, castle: null, large: false, snakes: [], posts: [] };
 
   function applyTheme(th) {
     for (const t of groundTex) t.dispose();
@@ -528,10 +529,93 @@ export function createWorld(canvas, high) {
     };
   }
 
+  // treehouses, catwalks, stairs and trees (Frontline Valley)
+  function placeForest(parts) {
+    for (const part of parts) {
+      const rot = part.rot || 0, g = new THREE.Group(); g.position.set(part.x, 0, part.z); g.rotation.y = rot;
+      bunkerMeshes.push(...buildForestPart(part, g));
+      finishGroup(g);
+      const base = { x: part.x, z: part.z, rot };
+      switch (part.type) {
+        case 'floor':
+          shapes.push({ ...base, t: 'b', hw: part.w / 2, hd: part.d / 2, y0: part.top - 0.4, y1: part.top });
+          surfaces.push({ ...base, t: 'f', hw: part.w / 2, hd: part.d / 2, top: part.top });
+          break;
+        case 'stairs': { const r = { ...base, t: 'r', hw: part.w / 2, hd: part.d / 2, h0: part.h0, h1: part.h1, y0: Math.min(part.h0, part.h1) }; shapes.push(r); surfaces.push(r); break; }
+        case 'rail': case 'pwall': shapes.push({ ...base, t: 'b', hw: part.L / 2, hd: 0.08, y0: part.y0, y1: part.y1 }); break;
+        case 'trunk': shapes.push({ ...base, t: 'c', r: part.r, y0: 0, y1: part.h }); break;
+        case 'post': shapes.push({ ...base, t: 'c', r: part.r, y0: 0, y1: part.h, noCover: true }); break;
+      }
+    }
+  }
+  // Big maps: merge everything static into a few meshes per material and area, so the hundreds of bunkers
+  // and treehouse pieces cost a few dozen draw calls. The original meshes stay (hidden) for paint and sight checks.
+  function batchStatic() {
+    const CH = 32, buckets = new Map(), all = [];
+    arena.traverse((m) => { if (m.isMesh && m.visible && m.material.visible !== false && !m.userData.batch) all.push(m); });
+    for (const m of all) {
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+      g.morphAttributes = {};
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      g.clearGroups();
+      g.applyMatrix4(m.matrixWorld);
+      const e = m.matrixWorld.elements, key = `${m.material.uuid}|${Math.floor(e[12] / CH)},${Math.floor(e[14] / CH)}`;
+      if (!buckets.has(key)) buckets.set(key, { mat: m.material, geos: [] });
+      buckets.get(key).geos.push(g);
+      m.visible = false;
+    }
+    for (const { mat, geos } of buckets.values()) {
+      const g = mergeGeometries(geos, false);
+      geos.forEach((q) => q.dispose());
+      if (!g) continue;
+      const mesh = new THREE.Mesh(g, mat);
+      mesh.userData.batch = true; mesh.castShadow = mesh.receiveShadow = high;
+      arena.add(mesh);
+    }
+  }
+  // Paint and sight lines only test the meshes in the grid cells a line passes through.
+  const cg = { cs: 6, x0: 0, z0: 0, W: 1, H: 1, cells: [], stamp: 0 }, nearBuf = [], bb = new THREE.Box3();
+  function buildColGrid() {
+    cg.x0 = -NETB.hw - 3; cg.z0 = -NETB.hd - 3;
+    cg.W = Math.ceil((NETB.hw * 2 + 6) / cg.cs); cg.H = Math.ceil((NETB.hd * 2 + 6) / cg.cs);
+    cg.cells = new Array(cg.W * cg.H);
+    for (const m of bunkerMeshes) {
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      bb.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+      const i0 = clamp(Math.floor((bb.min.x - cg.x0) / cg.cs), 0, cg.W - 1), i1 = clamp(Math.floor((bb.max.x - cg.x0) / cg.cs), 0, cg.W - 1);
+      const j0 = clamp(Math.floor((bb.min.z - cg.z0) / cg.cs), 0, cg.H - 1), j1 = clamp(Math.floor((bb.max.z - cg.z0) / cg.cs), 0, cg.H - 1);
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) (cg.cells[j * cg.W + i] || (cg.cells[j * cg.W + i] = [])).push(m);
+    }
+  }
+  /** The bunker/structure meshes near the line (ax, az) → (bx, bz) (a shared array: use it straight away). */
+  function near(ax, az, bx, bz) {
+    const out = nearBuf, { cs, x0, z0, W, H, cells } = cg, st = ++cg.stamp;
+    out.length = 0;
+    const add = (i, j) => {
+      if (i < 0 || j < 0 || i >= W || j >= H) return;
+      const c = cells[j * W + i]; if (!c) return;
+      for (const m of c) if (m.userData.cst !== st) { m.userData.cst = st; out.push(m); }
+    };
+    let i = Math.floor((ax - x0) / cs), j = Math.floor((az - z0) / cs);
+    const ti = Math.floor((bx - x0) / cs), tj = Math.floor((bz - z0) / cs);
+    const dx = bx - ax, dz = bz - az, si = Math.sign(dx), sj = Math.sign(dz);
+    const tdx = dx ? cs / Math.abs(dx) : Infinity, tdz = dz ? cs / Math.abs(dz) : Infinity;
+    let tmx = dx ? (si > 0 ? x0 + (i + 1) * cs - ax : ax - (x0 + i * cs)) / Math.abs(dx) : Infinity;
+    let tmz = dz ? (sj > 0 ? z0 + (j + 1) * cs - az : az - (z0 + j * cs)) / Math.abs(dz) : Infinity;
+    add(i, j);
+    for (let n = Math.abs(ti - i) + Math.abs(tj - j); n > 0; n--) {
+      if (tmx < tmz) { tmx += tdx; i += si; } else { tmz += tdz; j += sj; }
+      add(i, j);
+    }
+    return out;
+  }
+
   function computeCover() {
     const off = 0.38 + 0.4;
     for (const s of shapes) {
-      if (s.y0 > 0.5 || s.t === 'r') continue;
+      if (s.y0 > 0.5 || s.t === 'r' || s.noCover) continue;
       const local = s.t === 'c'
         ? [...Array(8)].map((_, i) => [Math.cos(i * Math.PI / 4) * (s.r + off), Math.sin(i * Math.PI / 4) * (s.r + off)])
         : [[s.hw + off, 0], [-s.hw - off, 0], [0, s.hd + off], [0, -s.hd - off],
@@ -560,12 +644,14 @@ export function createWorld(canvas, high) {
     setSize(map.size || SMALL);
     applyTheme(map.theme);
     const place = (list, mirror) => {
-      for (const [kind, x, z, rot = 0] of list) {
-        placeBunker(map.style, kind, x, z, rot);
-        if (mirror && x !== 0) placeBunker(map.style, kind, -x, z, Math.PI - rot);
+      for (const [kind, x, z, rot = 0, style = map.style] of list) {
+        placeBunker(style, kind, x, z, rot);
+        if (mirror && x !== 0) placeBunker(style, kind, -x, z, Math.PI - rot);
       }
     };
     place(map.layout, true);
+    info.posts = [];
+    if (map.forest) { placeForest(map.forest.parts); info.posts = map.forest.posts; }
     info.map = map; info.mode = mode; info.large = !!map.large; info.flags = null; info.castle = null;
     if (mode === 'ctf' && map.ctf) {
       place(map.ctf, true);
@@ -578,6 +664,8 @@ export function createWorld(canvas, high) {
     arena.updateMatrixWorld(true);
     computeCover();
     buildNav();
+    buildColGrid();
+    if (map.battle) batchStatic();
     return map;
   }
 
@@ -591,7 +679,26 @@ export function createWorld(canvas, high) {
   const pool = [], POOL = high ? 800 : 300;
   let pi = 0;
   const tmp = new THREE.Vector3();
+  // splats on the field and bunkers: one instanced mesh per team colour and splat shape (12 draw calls however
+  // much paint is flying); splats on players are separate meshes that ride along on the model
+  const IPOOL = Math.ceil((high ? 1500 : 600) / 6), dummy = new THREE.Object3D();
+  const inst = decalMats.map((mats) => mats.map((mat) => {
+    const im = new THREE.InstancedMesh(decalGeo, mat, IPOOL);
+    im.count = 0; im.renderOrder = 1; im.frustumCulled = false; im.userData.next = 0;
+    scene.add(im); return im;
+  }));
   function addSplat(point, normal, team, size, parent) {
+    if (!parent) {
+      const im = inst[team][(Math.random() * 6) | 0], i = im.userData.next;
+      dummy.position.copy(point).addScaledVector(normal, 0.006);
+      dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(size);
+      dummy.lookAt(tmp.copy(dummy.position).add(normal));
+      dummy.rotateZ(Math.random() * Math.PI * 2);
+      dummy.updateMatrix();
+      im.setMatrixAt(i, dummy.matrix); im.instanceMatrix.needsUpdate = true;
+      im.userData.next = (i + 1) % IPOOL; im.count = Math.max(im.count, i + 1);
+      return null;
+    }
     let m = pool[pi];
     if (!m) { m = new THREE.Mesh(decalGeo, decalMats[0][0]); m.renderOrder = 1; pool[pi] = m; }
     pi = (pi + 1) % POOL;
@@ -606,7 +713,10 @@ export function createWorld(canvas, high) {
     if (parent) parent.attach(m);
     return m;
   }
-  function clearSplats() { for (const m of pool) if (m) m.removeFromParent(); }
+  function clearSplats() {
+    for (const m of pool) if (m) m.removeFromParent();
+    for (const row of inst) for (const im of row) { im.count = 0; im.userData.next = 0; }
+  }
 
   const puffTex = canvasTex(64, 64, (g) => {
     const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
@@ -635,5 +745,5 @@ export function createWorld(canvas, high) {
     }
   }
 
-  return { renderer, scene, camera, bunkerMeshes, cover, addSplat, clearSplats, puff, update, loadMap, info, findPath };
+  return { renderer, scene, camera, bunkerMeshes, cover, addSplat, clearSplats, puff, update, loadMap, info, findPath, near };
 }

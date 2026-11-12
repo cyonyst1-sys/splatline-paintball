@@ -18,6 +18,7 @@ export const KINDS = {
   temple:    { t: 'b', w: 1.3, d: 2.6, h: 2.55 },
   container: { t: 'b', w: 6.0, d: 2.4, h: 3.2 },
   snake:     { t: 'b', w: 10.9, d: 1.0, h: 1.25 },
+  box:       { t: 'b', w: 1.7, d: 1.7, h: 1.45 }, // wooden box (Frontline Valley only)
   can:       { t: 'c', r: 0.6, h: 2.6 },
   bigcan:    { t: 'c', r: 0.8, h: 3.3 },
   minican:   { t: 'c', r: 0.5, h: 1.6 },
@@ -338,6 +339,7 @@ const CLASSIC = {
   temple: [0x00c2a8, 0x0d3b66], container: [0xffcc00, 0x1b1b1b], snake: [0xffcc00, 0x1b1b1b], can: [0x1fb5ff, 0xffffff],
   bigcan: [0x7b2ff7, 0xffcc00], minican: [0x1fb5ff, 0xffffff], cake: [0xff2d6f, 0xffffff], tri: [0xff7a00, 0xffffff],
 };
+const teamPal = (a, b) => ({ block: [a, b], wall: [a, b], longwall: [a, b], tall: [a, b], temple: [a, b], container: [a, b], snake: [a, b], can: [a, b], bigcan: [a, b], minican: [a, b], cake: [a, b], tri: [a, b] });
 const NEON = {
   block: [0x14141c, 0x00f0ff], wall: [0x14141c, 0x00f0ff], longwall: [0x1a1030, 0xff2bd6], tall: [0x1a1030, 0xff2bd6],
   temple: [0x1a1030, 0xb04dff], container: [0x101820, 0x9dff00], snake: [0x101820, 0x9dff00], can: [0x14141c, 0xffe100],
@@ -405,6 +407,8 @@ function pallet(kit, x, y, z, w, d, ry) {
 const STYLES = {
   inflatable: inflatable(CLASSIC, false),
   neon: inflatable(NEON, true),
+  infRed: inflatable(teamPal(0xc3283b, 0x24479e), false),  // Frontline Valley: red and blue tournament inflatables
+  infBlue: inflatable(teamPal(0x2150b0, 0xc3283b), false),
 
   wood(kind, K, kit) {
     const P = MT.planks(), D = MT.darkwood(), B = MT.bark(), E = MT.rings();
@@ -875,34 +879,213 @@ MAPS.push(
       ['can', -28, -10], ['can', -28, 10], ['tri', -24, 0], ['minican', -32, -17], ['minican', -32, 17]],
     kothBase: [['cake', -38, -7], ['cake', -38, 7], ['tall', -32, -14], ['tall', -32, 14], ['wall', -28, 0, PI / 2], ['can', -24, -8], ['can', -24, 8]] },
 );
-// ---------- the battlefield (200 x 120 m, four times a large map) for 32 v 32 Battle ----------
+// ---------- the battlefield (200 x 120 m, four times a large map) for 20 v 20 Battle ----------
+// A tournament field in the woods: tall trees all over, treehouse forts on each half joined by catwalks
+// (two levels: a deck with a solid front parapet, and a hut with windows above it), a long bridge of
+// platforms across the 50, and hundreds of red/blue inflatables and wooden boxes.
 // Generated from a fixed seed, so every browser in a multiplayer room builds exactly the same field.
 const BATTLE = { hw: 100, hd: 60 };
-function battleLayout(seed) {
+export const TREE_H1 = 3.4, TREE_H2 = 6.8;
+function seeded(seed) {
   let s = seed >>> 0;
-  const r = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  const kinds = [['can', 4], ['tall', 3], ['wall', 4], ['block', 3], ['tri', 3], ['minican', 3], ['temple', 3], ['bigcan', 1], ['longwall', 2], ['cake', 1], ['container', 1]];
-  const total = kinds.reduce((a, k) => a + k[1], 0);
-  const kind = () => { let x = r() * total; for (const [k, w] of kinds) if ((x -= w) < 0) return k; return 'can'; };
-  const out = [];
-  // snakes: two down each sideline per half, and one each side of the middle lane
-  for (const x of [-74, -40]) { out.push(['snake', x, 56]); out.push(['snake', x, -56]); }
-  out.push(['snake', -22, 21]); out.push(['snake', -22, -21]);
-  const nearSnake = (x, z) => Math.abs(Math.abs(z) - 21) < 3 && Math.abs(x + 22) < 8;
-  // a jittered grid of bunkers over the half, leaving the back 12 m clear for the start line
-  const cell = 8.5;
-  for (let x = -86; x <= -6; x += cell) for (let z = -48; z <= 48.1; z += cell) {
-    if (r() < 0.36) continue;
-    const jx = x + (r() - 0.5) * 3, jz = z + (r() - 0.5) * 3;
-    if (nearSnake(jx, jz)) continue;
-    out.push([kind(), +jx.toFixed(1), +jz.toFixed(1), +(r() * PI).toFixed(2)]);
+  return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+// Parts: floor (deck), stairs (walkable slope), rail (1 m railing: slats, or solid planks), pwall (hut wall with
+// windows), roof, trunk (tree with a canopy), post (support). posts: firing positions for the bots' tower role,
+// each with the route up to it (ground foot of the stairs first).
+function forestPlan(seed) {
+  const r = seeded(seed), H1 = TREE_H1, H2 = TREE_H2, P = [], posts = [], keep = [], trees = [];
+  // sx = +1: built facing +x (Blue's half); -1 mirrors it for Red
+  const put = (sx, ox, oz) => ({
+    add: (type, lx, lz, rot, o) => P.push({ type, x: ox + sx * lx, z: oz + lz, rot: sx > 0 ? rot : PI - rot, ...o }),
+    pt: (lx, lz, y = 0) => ({ x: ox + sx * lx, z: oz + lz, y }),
+    keep: (x0, x1, z0, z1) => keep.push({ x0: Math.min(ox + sx * x0, ox + sx * x1), x1: Math.max(ox + sx * x0, ox + sx * x1), z0: oz + z0, z1: oz + z1 }),
+  });
+  // a railing along local z (x fixed) or along local x (z fixed), split into short pieces
+  const railZ = (T, x, z0, z1, y, solid) => { const n = Math.ceil((z1 - z0) / 6), L = (z1 - z0) / n; for (let i = 0; i < n; i++) T.add('rail', x, z0 + L * (i + 0.5), PI / 2, { L, y0: y, y1: y + 1.05, solid }); };
+  const railX = (T, z, x0, x1, y, solid) => { const n = Math.ceil((x1 - x0) / 6), L = (x1 - x0) / n; for (let i = 0; i < n; i++) T.add('rail', x0 + L * (i + 0.5), z, 0, { L, y0: y, y1: y + 1.05, solid }); };
+  const pwallZ = (T, x, z0, z1, wins) => T.add('pwall', x, (z0 + z1) / 2, PI / 2, { L: z1 - z0, y0: H2, y1: H2 + 2.2, wins: wins.map((z) => (z0 + z1) / 2 - z) });
+  const pwallX = (T, z, x0, x1, wins) => T.add('pwall', (x0 + x1) / 2, z, 0, { L: x1 - x0, y0: H2, y1: H2 + 2.2, wins: wins.map((x) => x - (x0 + x1) / 2) });
+  const catwalk = (T, x, z0, z1) => { // a 1.8 m catwalk along z, on posts, with slat railings
+    const n = Math.ceil((z1 - z0) / 8), L = (z1 - z0) / n;
+    for (let i = 0; i < n; i++) T.add('floor', x, z0 + L * (i + 0.5), 0, { w: 1.8, d: L, top: H1 });
+    railZ(T, x - 0.95, z0, z1, H1, false); railZ(T, x + 0.95, z0, z1, H1, false);
+    for (let z = z0 + 4; z < z1 - 2; z += 5) for (const s of [-1, 1]) { T.add('post', x + s * 0.85, z, 0, { r: 0.13, h: H1 - 0.1 }); }
+    T.keep(x - 1.6, x + 1.6, z0, z1);
+  };
+
+  // --- a treehouse on each half's fort line: big trunk, deck (H1) and a hut (H2) with windows and a roof ---
+  // local: trunk at (0,0); deck x -2.5..6 (6 = the front, toward the enemy); hut x -2.5..1.8; stairs up from
+  // the back (-x) and from the deck to the hut door; catwalks join along x = -1.5
+  const fortHouse = (sx, ox, oz, team, linkS, linkN) => {
+    const T = put(sx, ox, oz);
+    T.add('trunk', 0, 0, 0, { r: 0.6, h: 18, crown: 4.2 });
+    T.add('floor', 1.75, 0, 0, { w: 8.5, d: 7, top: H1 });
+    T.add('floor', -0.35, 0, 0, { w: 4.3, d: 7, top: H2 });
+    T.add('stairs', -5.25, -2, 0, { w: 5.5, d: 1.4, h0: 0, h1: H1 });
+    T.add('stairs', 3.8, 2.75, PI, { w: 4, d: 1.3, h0: H1, h1: H2 });
+    for (const [x, z] of [[-2.35, -3.35], [-2.35, 3.35], [5.85, -3.35], [5.85, 3.35]]) T.add('post', x, z, 0, { r: 0.14, h: H1 - 0.1 });
+    // deck railings: back (gap for the stairs), sides (gap for a catwalk), solid parapet at the front
+    railZ(T, -2.5, -3.5, -2.75, H1, false); railZ(T, -2.5, -1.25, 3.5, H1, false);
+    railX(T, -3.5, linkS ? -0.55 : -2.5, 6, H1, false); railX(T, 3.5, linkN ? -0.55 : -2.5, 6, H1, false);
+    railZ(T, 6, -3.5, 3.5, H1, true);
+    // the hut: windows all round, door at the top of the stairs
+    pwallZ(T, 1.8, -3.5, 2.05, [-2.3, 0.6]); pwallZ(T, -2.5, -3.5, 3.5, [-1.8, 1.8]);
+    pwallX(T, -3.5, -2.5, 1.8, [-0.35]); pwallX(T, 3.5, -2.5, 1.8, [-0.35]);
+    T.add('roof', -0.35, 0, 0, { w: 4.9, d: 7.6, y: H2 + 2.2 });
+    T.keep(-9.6, 6.9, -4.4, 4.4);
+    // firing positions and the way up
+    const G = T.pt(-8.75, -2), T1 = T.pt(-2.1, -2, H1), A = T.pt(1.2, -2, H1);
+    for (const z of [-2.6, -0.6, 1.4]) posts.push({ team, ...T.pt(5.45, z, H1), route: [G, T1, A, T.pt(5.45, z, H1)] });
+    const up = [G, T1, A, T.pt(5.1, 1.0, H1), T.pt(5.4, 2.75, H1), T.pt(2.1, 2.75, H2), T.pt(1.3, 2.75, H2)];
+    for (const z of [0.6, -2.3]) posts.push({ team, hut: true, ...T.pt(1.25, z, H2), route: [...up, T.pt(1.25, z, H2)] });
+    trees.push({ x: ox, z: oz, r: 0.6 });
+  };
+  for (const [sx, team] of [[1, 0], [-1, 1]]) {
+    const ox = -sx * 50, zs = [-30, 0, 30];
+    zs.forEach((z, i) => fortHouse(sx, ox, z, team, i > 0, i < zs.length - 1));
+    for (let i = 0; i < zs.length - 1; i++) catwalk(put(sx, ox, 0), -1.5, zs[i] + 3.5, zs[i + 1] - 3.5);
   }
-  // the centre line
-  for (const z of [-45, -30, -15, 0, 15, 30, 45]) out.push([z === 0 ? 'cake' : Math.abs(z) === 30 ? 'bigcan' : 'tall', 0, z, z ? 0.78 : 0]);
+
+  // --- the centre bridge: platforms between four trees, stairs up from both halves, joined by a catwalk ---
+  const cz = [-40, -40 / 3, 40 / 3, 40];
+  cz.forEach((oz, i) => {
+    const T = put(1, 0, oz);
+    for (const [x, z] of [[-3.95, -3.95], [3.95, -3.95], [-3.95, 3.95], [3.95, 3.95]]) { T.add('trunk', x, z, 0, { r: 0.45, h: 16, crown: 3.4 }); trees.push({ x, z: oz + z, r: 0.45 }); }
+    T.add('floor', 0, 0, 0, { w: 7, d: 7, top: H1 });
+    T.add('stairs', -6.25, -2, 0, { w: 5.5, d: 1.4, h0: 0, h1: H1 });
+    T.add('stairs', 6.25, -2, PI, { w: 5.5, d: 1.4, h0: 0, h1: H1 });
+    for (const s of [-1, 1]) { railZ(T, s * 3.5, -3.5, -2.75, H1, true); railZ(T, s * 3.5, -1.25, 3.5, H1, true); }
+    const s0 = i > 0, n0 = i < cz.length - 1;
+    for (const [z, open] of [[-3.5, s0], [3.5, n0]]) {
+      if (open) { railX(T, z, -3.5, -0.95, H1, false); railX(T, z, 0.95, 3.5, H1, false); } else railX(T, z, -3.5, 3.5, H1, false);
+    }
+    T.add('roof', 0, 0, 0, { w: 7.4, d: 7.6, y: H1 + 2.7, pillars: true });
+    T.keep(-10, 10, -4.6, 4.6);
+    for (const [team, sx] of [[0, 1], [1, -1]]) {
+      const U = put(sx, 0, oz), G = U.pt(-9.6, -2), T1 = U.pt(-3.1, -2, H1);
+      for (const z of [-0.2, 2.4]) posts.push({ team, centre: true, ...U.pt(3.0, z, H1), route: [G, T1, U.pt(3.0, z, H1)] });
+    }
+    if (n0) catwalk(put(1, 0, 0), 0, oz + 3.5, cz[i + 1] - 3.5);
+  });
+
+  // --- the woods: tall trees scattered over both halves (mirrored) ---
+  const kept = (x, z, m) => keep.some((k) => x > k.x0 - m && x < k.x1 + m && z > k.z0 - m && z < k.z1 + m);
+  for (let tries = 0, n = 0; n < 40 && tries < 2000; tries++) {
+    const x = -6 - r() * 86, z = (r() * 2 - 1) * 56;
+    if (kept(x, z, 2.5) || kept(-x, z, 2.5) || trees.some((t) => Math.hypot(t.x - x, t.z - z) < 7)) continue;
+    const rr = 0.32 + r() * 0.24, h = 13 + r() * 6;
+    for (const sx of [1, -1]) { P.push({ type: 'trunk', x: sx * x, z, rot: r() * 6, r: rr, h, crown: 3 + r() * 1.8 }); trees.push({ x: sx * x, z, r: rr }); }
+    n++;
+  }
+  return { parts: P, posts, keep, trees };
+}
+function battleLayout(seed, plan) {
+  const r = seeded(seed);
+  const weighted = (list) => { const total = list.reduce((a, k) => a + k[1], 0); return () => { let x = r() * total; for (const [k, w] of list) if ((x -= w) < 0) return k; return list[0][0]; }; };
+  // red and blue tournament inflatables, and wooden boxes and walls (with logs, stumps and cable spools)
+  const inflKind = weighted([['can', 4], ['tall', 3], ['tri', 3], ['block', 3], ['temple', 3], ['minican', 3], ['bigcan', 2], ['cake', 1]]);
+  const woodKind = weighted([['box', 6], ['wall', 4], ['longwall', 2], ['tall', 2], ['block', 2], ['can', 2], ['cake', 1], ['tri', 1]]);
+  const out = [];
+  // snakes (fallen logs): two down each sideline per half, and one each side of the middle lane
+  for (const x of [-74, -38]) { out.push(['snake', x, 56.5]); out.push(['snake', x, -56.5]); }
+  out.push(['snake', -22, 21]); out.push(['snake', -22, -21]);
+  const nearSnake = (x, z) => (Math.abs(Math.abs(z) - 21) < 3 && Math.abs(x + 22) < 8) || (Math.abs(z) > 53 && (Math.abs(x + 74) < 8 || Math.abs(x + 38) < 8));
+  const blocked = (x, z, m) => plan.keep.some((k) => x > k.x0 - m && x < k.x1 + m && z > k.z0 - m && z < k.z1 + m)
+    || plan.trees.some((t) => Math.hypot(t.x - x, t.z - z) < t.r + m);
+  // a dense jittered grid over the half, leaving the back 9 m clear for the start line
+  const cell = 5.0;
+  for (let x = -90; x <= -4; x += cell) for (let z = -54; z <= 54.1; z += cell) {
+    if (r() < 0.25) continue;
+    const jx = x + (r() - 0.5) * 3.2, jz = z + (r() - 0.5) * 3.2;
+    const infl = r() < 0.45, kind = infl ? inflKind() : woodKind();
+    const R = kind === 'longwall' ? 3 : 2;
+    if (nearSnake(jx, jz) || blocked(jx, jz, R) || blocked(-jx, jz, R) || jx > -R) continue;
+    out.push([kind, +jx.toFixed(1), +jz.toFixed(1), +(r() * PI).toFixed(2), infl ? (r() < 0.5 ? 'infRed' : 'infBlue') : 'wood']);
+  }
+  // the centre line, beyond the ends of the bridge
+  out.push(['cake', 0, -53, 0, 'infRed'], ['cake', 0, 53, 0, 'infBlue'], ['tall', 0, -47, 0.78, 'wood'], ['tall', 0, 47, 0.78, 'wood']);
   return out;
 }
-MAPS.push({ id: 'frontline', name: 'Frontline Valley', style: 'wood', theme: T.woods, battle: true, size: BATTLE,
-  desc: 'A huge woodsball valley of plank walls, logs and stumps for 32 v 32.', layout: battleLayout(20261111) });
+const FOREST = forestPlan(20261112);
+MAPS.push({ id: 'frontline', name: 'Frontline Valley', style: 'wood', theme: T.woods, battle: true, size: BATTLE, forest: FOREST,
+  desc: 'A tournament field in the woods: treehouse forts, catwalks and a bridge over the 50, for 20 v 20.', layout: battleLayout(20261111, FOREST) });
+
+// ---------- treehouses, catwalks and trees (Frontline Valley) ----------
+const CANOPY = new THREE.IcosahedronGeometry(1, 1);
+/** Build one forest part into `group` (positioned by the caller). Returns the meshes paint can hit. */
+export function buildForestPart(part, group) {
+  const kit = new Kit(), P = MT.planks(), D = MT.darkwood(), B = MT.bark();
+  switch (part.type) {
+    case 'floor': { // plank deck on beams
+      kit.add(P, G.box, 0, part.top - 0.07, 0, part.w, 0.14, part.d);
+      for (const s of [-1, 1]) kit.add(D, G.box, s * (part.w / 2 - 0.1), part.top - 0.28, 0, 0.16, 0.28, part.d);
+      if (part.w > 3) for (let z = -part.d / 2 + 0.6; z < part.d / 2; z += 1.6) kit.add(D, G.box, 0, part.top - 0.26, z, part.w - 0.2, 0.22, 0.12);
+      break;
+    }
+    case 'stairs': { // treads on two stringers, with handrails
+      const L = part.w, rise = part.h1 - part.h0, n = Math.max(2, Math.round(Math.abs(rise) / 0.26)), a = Math.atan2(rise, L), len = Math.hypot(L, rise);
+      for (let i = 0; i < n; i++) kit.add(P, G.box, -L / 2 + L * (i + 0.5) / n, part.h0 + rise * (i + 0.5) / n, 0, L / n + 0.05, 0.06, part.d);
+      for (const s of [-1, 1]) {
+        const z = s * (part.d / 2 + 0.05), ym = part.h0 + rise / 2;
+        kit.add(D, G.box, 0, ym - 0.12, z, len, 0.26, 0.08, 0, 0, a);
+        kit.add(D, G.box, 0, ym + 0.95, z, len, 0.07, 0.07, 0, 0, a);
+        for (const f of [0.15, 0.5, 0.85]) kit.add(D, G.box, -L / 2 + L * f, part.h0 + rise * f + 0.45, z, 0.07, 1.0, 0.07);
+      }
+      if (part.h0 < 0.1 || part.h1 < 0.1) { const lo = part.h0 < part.h1 ? -1 : 1; kit.add(D, G.box, -lo * L * 0.3, Math.abs(rise) * 0.35, 0, 0.14, Math.abs(rise) * 0.7, part.d); }
+      break;
+    }
+    case 'rail': { // posts, top and middle rails; slats (gappy) or solid planks
+      const L = part.L, y = part.y0, n = Math.max(1, Math.round(L / 1.4));
+      for (let i = 0; i <= n; i++) kit.add(D, G.box, -L / 2 + L * i / n, y + 0.52, 0, 0.1, 1.05, 0.1);
+      kit.add(D, G.box, 0, y + 1.02, 0, L, 0.07, 0.12);
+      if (part.solid) kit.add(P, G.box, 0, y + 0.48, 0, L, 0.92, 0.06);
+      else {
+        kit.add(D, G.box, 0, y + 0.5, 0, L, 0.06, 0.08);
+        for (let x = -L / 2 + 0.2; x < L / 2 - 0.1; x += 0.34) kit.add(P, G.box, x, y + 0.5, 0, 0.12, 0.95, 0.04);
+      }
+      break;
+    }
+    case 'pwall': { // a hut wall: planks below the sill and above the window head, open windows between
+      const L = part.L, sill = part.y0 + 0.95, head = part.y0 + 1.95, hw = 0.6;
+      kit.add(P, G.box, 0, (part.y0 + sill) / 2, 0, L, sill - part.y0, 0.1);
+      kit.add(P, G.box, 0, (head + part.y1) / 2, 0, L, part.y1 - head, 0.1);
+      let x = -L / 2;
+      for (const c of [...part.wins].sort((p, q) => p - q)) {
+        if (c - hw - x > 0.01) kit.add(P, G.box, (x + c - hw) / 2, (sill + head) / 2, 0, c - hw - x, head - sill, 0.1);
+        kit.add(D, G.box, c, sill - 0.03, 0, hw * 2 + 0.1, 0.07, 0.2); // sill
+        x = c + hw;
+      }
+      if (L / 2 - x > 0.01) kit.add(P, G.box, (x + L / 2) / 2, (sill + head) / 2, 0, L / 2 - x, head - sill, 0.1);
+      for (const s of [-1, 1]) kit.add(D, G.box, s * (L / 2 - 0.06), (part.y0 + part.y1) / 2, 0, 0.12, part.y1 - part.y0, 0.14);
+      break;
+    }
+    case 'roof': { // pitched plank roof, ridge along local x
+      const a = 0.42, half = part.d / 2 + 0.3, run = half / Math.cos(a);
+      for (const s of [-1, 1]) kit.add(D, G.box, 0, part.y + Math.tan(a) * half / 2, s * half / 2, part.w + 0.4, 0.09, run, 0, s * a);
+      if (part.pillars) for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) kit.add(D, G.box, x * (part.w / 2 - 0.15), part.y - 1.1, z * (part.d / 2 - 0.2), 0.1, 2.3, 0.1);
+      break;
+    }
+    case 'post': kit.add(D, G.cylLo, 0, part.h / 2, 0, part.r, part.h, part.r); break;
+    case 'trunk': { // tapering trunk, a few branches, and a leafy crown high overhead
+      const h = part.h, r = part.r, Lf = MT.leaf();
+      kit.add(B, TRUNK_GEO, 0, h / 2, 0, r, h, r);
+      kit.add(B, G.cylLo, 0, 0.15, 0, r * 1.35, 0.3, r * 1.35);
+      for (let i = 0; i < 4; i++) {
+        const a = i * 1.7 + rnd(0, 0.6), y = h * rnd(0.55, 0.8), l = part.crown * rnd(0.6, 0.9);
+        kit.add(B, G.cylLo, Math.cos(a) * l * 0.45, y + l * 0.3, Math.sin(a) * l * 0.45, r * 0.3, l, r * 0.3, 0, Math.sin(a), -Math.cos(a));
+      }
+      const C = part.crown;
+      kit.add(Lf, CANOPY, 0, h - C * 0.2, 0, C, C * 0.7, C);
+      for (let i = 0; i < 4; i++) { const a = i * 1.57 + rnd(0, 0.8); kit.add(Lf, CANOPY, Math.cos(a) * C * 0.75, h - C * rnd(0.5, 0.8), Math.sin(a) * C * 0.75, C * rnd(0.55, 0.75), C * 0.5, C * rnd(0.55, 0.75)); }
+      kit.build(group);
+      return group.children.filter((c) => c.isMesh && c.material === B);
+    }
+  }
+  kit.build(group);
+  return group.children.filter((c) => c.isMesh);
+}
+const TRUNK_GEO = new THREE.CylinderGeometry(0.75, 1, 1, 10);
 
 export const mapById = (id) => MAPS.find((m) => m.id === id) || MAPS[0];
 /** Maps that can host a game mode: the 10 small fields for Elimination, the 3 large ones for CTF and King of the
