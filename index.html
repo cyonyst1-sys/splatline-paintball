@@ -4,6 +4,30 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Splatline Paintball</title>
+<meta name="build" content="20261111201804">
+<script>
+// Stale-page guard. GitHub Pages lets browsers keep this page for up to 10 minutes, and an old copy of the
+// page mixed with newer game files breaks aiming and shooting. version.json is always fetched fresh; if it
+// names a newer build than this page, reload once from a fresh URL (keeping ?room= invite links etc.).
+window.splatVersion = {
+  build: document.querySelector('meta[name=build]').content,
+  check: function () {
+    var build = this.build;
+    return fetch('version.json?nc=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || typeof j.v !== 'string' || j.v === build) return false;
+        var q = new URLSearchParams(location.search);
+        if (q.get('fresh') === j.v) return false;      // already tried this build: don't loop
+        q.set('fresh', j.v);
+        location.replace(location.pathname + '?' + q.toString() + location.hash);
+        return true;
+      })
+      .catch(function () { return false; });
+  },
+};
+window.splatVersion.check();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Inter:wght@500;700;800&display=swap" rel="stylesheet">
@@ -215,13 +239,13 @@
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "./src/main.js": "./src/main.js?v=20261111200930",
-  "./src/world.js": "./src/world.js?v=20261111200930",
-  "./src/maps.js": "./src/maps.js?v=20261111200930",
-  "./src/marker.js": "./src/marker.js?v=20261111200930",
-  "./src/economy.js": "./src/economy.js?v=20261111200930",
-  "./src/audio.js": "./src/audio.js?v=20261111200930",
-  "./src/net.js": "./src/net.js?v=20261111200930"
+  "./src/main.js": "./src/main.js?v=20261111201804",
+  "./src/world.js": "./src/world.js?v=20261111201804",
+  "./src/maps.js": "./src/maps.js?v=20261111201804",
+  "./src/marker.js": "./src/marker.js?v=20261111201804",
+  "./src/economy.js": "./src/economy.js?v=20261111201804",
+  "./src/audio.js": "./src/audio.js?v=20261111201804",
+  "./src/net.js": "./src/net.js?v=20261111201804"
 } }
 </script>
 </head>
@@ -418,6 +442,6 @@
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
 <!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
-<script type="module" src="src/main.js?v=20261111200930"></script>
+<script type="module" src="src/main.js?v=20261111201804"></script>
 </body>
 </html>

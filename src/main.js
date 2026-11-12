@@ -11,7 +11,13 @@ import {
   broadcast, sendTo, kick, leave as netLeave, cleanCode, dirStart, dirStop, dirSetRoom,
 } from './net.js';
 
-const $ = (id) => document.getElementById(id);
+// Look up a page element. If it's missing (an older copy of index.html with newer code), hand back a detached
+// stand-in so wiring it up can't throw and stop the rest of startup (input, mouse look, the game loop).
+const stubs = {};
+const $ = (id) => document.getElementById(id)
+  || stubs[id] || (console.warn(`index.html has no #${id} (stale page?)`), stubs[id] = document.createElement('div'));
+// multiplayer protocol version: players on different versions can't share a room
+const PROTO = 3;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -1403,7 +1409,7 @@ function lobbyAssign() {
 }
 function broadcastLobby() {
   // only accepted players get the lobby (people waiting for an answer don't)
-  const msg = { t: 'lobby', code: lobby.code, mode: lobby.mode, game: lobby.game, map: lobby.map, players: lobby.players };
+  const msg = { t: 'lobby', pv: PROTO, code: lobby.code, mode: lobby.mode, game: lobby.game, map: lobby.map, players: lobby.players };
   for (const l of lobby.players) if (l.id !== 'host') sendTo(l.id, msg);
   renderLobby(); updateListing();
 }
@@ -1464,6 +1470,8 @@ function hostMessage(from, m) {
   switch (m.t) {
     case 'hello': {
       if (lobby.players.some((l) => l.id === from) || lobby.pending.some((q) => q.id === from)) return;
+      // an older (or newer) copy of the game can't play in this room: tell them to refresh
+      if (m.pv !== PROTO) { sendTo(from, { t: 'old', pv: PROTO }); kick(from); return; }
       if (inGame() || state === 'paused') { sendTo(from, { t: 'busy' }); kick(from); return; }
       if (lobby.players.length >= maxPlayers() || lobby.pending.length >= 8) { sendTo(from, { t: 'full' }); kick(from); return; }
       // a request: the host decides
@@ -1518,6 +1526,7 @@ function hostPeerLeft(id) {
 function clientMessage(m) {
   switch (m.t) {
     case 'lobby': {
+      if (m.pv !== PROTO) { quitToHome(m.pv > PROTO ? 'Your game is out of date. Reloading…' : "The host's game is out of date. Ask them to refresh the page."); if (m.pv > PROTO) setTimeout(() => location.reload(), 1200); return; }
       if (!Array.isArray(m.players)) return;
       const game = validMode(m.game) ? m.game : 'elim';
       lobby = { code: cleanCode(m.code), mode: m.mode === 'coop' ? 'coop' : 'teams', game, map: validMap(m.map, game) ? m.map : 'random',
@@ -1530,6 +1539,10 @@ function clientMessage(m) {
     case 'busy': case 'full': case 'denied':
       backToRooms(m.t === 'busy' ? 'That room is in the middle of a match. Try again when it ends.'
         : m.t === 'full' ? 'That room is full.' : 'The host declined your request.');
+      return;
+    case 'old': // the host is on a different version of the game
+      if (isNum(m.pv) && m.pv > PROTO) { backToRooms('Your game is out of date. Reloading…'); setTimeout(() => location.reload(), 1200); }
+      else backToRooms("That host's game is out of date. They need to refresh the page.");
       return;
     case 'accepted':
       dirStop();
@@ -2204,7 +2217,7 @@ async function askToJoin(code, hostName) {
   mpBusy(true, `Connecting to ${hostName ? hostName + "'s room" : code}…`);
   try {
     await netJoin(code);
-    netSend({ t: 'hello', name: myName(), look: myLook() });
+    netSend({ t: 'hello', name: myName(), look: myLook(), pv: PROTO });
     mpBusy(true, `Asked to join ${hostName ? hostName + "'s room" : 'room ' + code}. Waiting for the host to accept…`);
     $('btnCancelJoin').classList.remove('hidden');
   } catch (e) { mpBusy(false, e.message || "Couldn't reach that room."); }
@@ -2219,6 +2232,7 @@ function backToRooms(msg) {
 }
 nav('btnCancelJoin', () => backToRooms('Request cancelled.'));
 nav('btnMP', () => {
+  if (window.splatVersion) window.splatVersion.check(); // a newer build is out? reload before joining anyone
   if (!netAvailable()) { toast("Multiplayer couldn't load. Check your internet connection and reload."); return; }
   mpBusy(false); showScreen('mp');
   $('btnCancelJoin').classList.add('hidden');
