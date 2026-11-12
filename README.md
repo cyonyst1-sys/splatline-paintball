@@ -24,8 +24,11 @@ You play on Blue with three bot teammates against four Red bots on an outdoor fi
 
 Click **Multiplayer** on the home screen.
 
-- **Host:** pick *Teams* (players split Blue vs Red) or *Co-op* (everyone on Blue vs bots), then **Create room**. Share the 5-character code or the invite link.
-- **Join:** enter the code (or open the invite link) and press **Join**.
+- **Open rooms:** the Multiplayer screen shows a live list of rooms that are online right now: the host's name, game mode, Teams or Co-op, map, players (e.g. 3/8), and whether a match is already running. Press **Ask to join** on one.
+- **Host:** pick *Teams* (players split Blue vs Red) or *Co-op* (everyone on Blue vs bots), then **Create room**. Your room appears in everyone's open rooms list (untick *Show my room in the open rooms list* to keep it private and share the 5-character code or invite link instead).
+- **Requests:** when someone asks to join, the host gets a notice and an **Accept** / **Deny** row in the lobby. Accepted players enter the lobby; denied players go back to the room list. The host presses **Start match** whenever the lobby has as many people as they want; anyone still waiting is turned away for that match.
+- **Join with a code:** enter the code (or open the invite link) and press **Ask to join**. The host still has to accept.
+- The room list has no server either: one browser on the Multiplayer screen keeps the list (over PeerJS) and, if it leaves, another takes over automatically within a few seconds. Room names show the host's chosen player name.
 - Up to 8 players in Teams, 4 in Co-op. Bots fill every empty slot, and take over if someone leaves.
 - The host's browser runs the match, so the host should keep the game tab open and in front. If the host leaves, the room closes.
 - It's peer-to-peer (WebRTC via [PeerJS](https://peerjs.com/)). PeerJS's free public server only introduces the browsers to each other; no game server is needed. Some strict school or work networks block peer-to-peer connections.

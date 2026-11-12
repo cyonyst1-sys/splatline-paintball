@@ -8,7 +8,7 @@ import { mapById, mapsFor } from './maps.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   net, onNet, available as netAvailable, host as netHost, join as netJoin, send as netSend,
-  broadcast, sendTo, kick, leave as netLeave, cleanCode,
+  broadcast, sendTo, kick, leave as netLeave, cleanCode, dirStart, dirStop, dirSetRoom,
 } from './net.js';
 
 const $ = (id) => document.getElementById(id);
@@ -277,7 +277,7 @@ let roundTime = 0, navBudget = 3; const HUNT_AFTER = 40;
 let gameMode = 'elim', teamSize = 4, timeLeft = 0;
 let flagsSt = null;                                   // CTF: [{ team, hx, hz, st: 0 home | 1 carried | 2 dropped, carrier, x, z, dropT }]
 const koth = { progress: 0, contested: false, att: 0, capTime: [null, null] };
-let lobby = { code: '', mode: 'teams', game: 'elim', map: 'center', players: [] };
+let lobby = { code: '', mode: 'teams', game: 'elim', map: 'center', players: [], pending: [] };
 let earned = null, specIdx = 0, locked = false, fallbackLook = false, hitMarker = 0, clock = 0, shopBack = 'home';
 let flash = null; // { text, color, t }
 const keys = {}, mouse = { down: false };
@@ -1372,11 +1372,12 @@ function endMatch(winner) {
   $('resAgain').textContent = net.mode ? 'BACK TO LOBBY' : 'PLAY AGAIN';
   $('resHome').textContent = net.mode ? 'Leave room' : 'Home';
   showScreen('results');
+  updateListing(); // the room is open to requests again
   sfx.coin();
 }
 function quitToHome(msg) {
   if (net.mode === 'host') broadcast({ t: 'bye' });
-  netLeave();
+  netLeave(); dirStop();
   state = 'home'; localPaused = false; releaseLock();
   gameMode = save.settings.gameMode || 'elim';
   if (players.length !== MODES[gameMode].teamSize * 2) makePlayers(MODES[gameMode].teamSize);
@@ -1401,17 +1402,43 @@ function lobbyAssign() {
   });
 }
 function broadcastLobby() {
-  broadcast({ t: 'lobby', code: lobby.code, mode: lobby.mode, game: lobby.game, map: lobby.map, players: lobby.players });
-  renderLobby();
+  // only accepted players get the lobby (people waiting for an answer don't)
+  const msg = { t: 'lobby', code: lobby.code, mode: lobby.mode, game: lobby.game, map: lobby.map, players: lobby.players };
+  for (const l of lobby.players) if (l.id !== 'host') sendTo(l.id, msg);
+  renderLobby(); updateListing();
+}
+// what the open rooms list shows about this room (or nothing, if the host chose not to list it)
+let listPublic = true;
+function updateListing() {
+  if (net.mode !== 'host') return;
+  dirSetRoom(listPublic ? { code: lobby.code, name: lobby.players[0] ? lobby.players[0].name : 'Host', game: lobby.game, map: lobby.map,
+    mode: lobby.mode, n: lobby.players.length, max: maxPlayers(), st: inGameOrPaused() ? 'playing' : 'lobby' } : null);
+}
+// host: answer a request to join
+function answerRequest(id, yes) {
+  const k = lobby.pending.findIndex((q) => q.id === id);
+  if (k < 0) return;
+  const [req] = lobby.pending.splice(k, 1);
+  if (yes && (inGameOrPaused() || lobby.players.length >= maxPlayers())) { toast('The room is full.'); yes = false; }
+  if (yes) {
+    lobby.players.push({ id: req.id, name: req.name, look: req.look });
+    sendTo(id, { t: 'accepted' });
+    broadcastLobby(); sfx.buy();
+  } else {
+    sendTo(id, { t: 'denied' }); kick(id);
+    renderLobby();
+  }
 }
 function hostStartMatch() {
   if (lobby.players.length > maxPlayers()) { toast(`Too many players for this mode (max ${maxPlayers()}).`); return; }
+  for (const q of [...lobby.pending]) answerRequest(q.id, false); // anyone still waiting misses this one
   const map = resolveMap(lobby.map, lobby.game);
   setupMode(lobby.game, map);
   const assign = lobbyAssign();
   broadcast({ t: 'start', assign, diff: save.settings.diff, map, game: lobby.game, ts: teamSize });
   assignSlots(assign);
   beginMatch(save.settings.diff); lock();
+  updateListing(); // shows as "in a match"
 }
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 const okVec = (a) => Array.isArray(a) && a.length === 3 && a.every(isNum);
@@ -1436,11 +1463,14 @@ function hostMessage(from, m) {
   const p = players.find((q) => q.peer === from && q.ctrl === 'remote');
   switch (m.t) {
     case 'hello': {
-      if (lobby.players.some((l) => l.id === from)) return;
+      if (lobby.players.some((l) => l.id === from) || lobby.pending.some((q) => q.id === from)) return;
       if (inGame() || state === 'paused') { sendTo(from, { t: 'busy' }); kick(from); return; }
-      if (lobby.players.length >= maxPlayers()) { sendTo(from, { t: 'full' }); kick(from); return; }
-      lobby.players.push({ id: from, name: cleanName(m.name), look: cleanLook(m.look) });
-      broadcastLobby(); sfx.beep();
+      if (lobby.players.length >= maxPlayers() || lobby.pending.length >= 8) { sendTo(from, { t: 'full' }); kick(from); return; }
+      // a request: the host decides
+      const req = { id: from, name: cleanName(m.name), look: cleanLook(m.look) };
+      lobby.pending.push(req);
+      renderLobby(); sfx.beep();
+      toast(`${req.name} wants to join. Accept or deny in the lobby.`);
       return;
     }
     case 'look': { // a joiner changed gear in the lobby
@@ -1471,6 +1501,9 @@ function hostMessage(from, m) {
   }
 }
 function hostPeerLeft(id) {
+  const wasPending = lobby.pending.some((q) => q.id === id);
+  lobby.pending = lobby.pending.filter((q) => q.id !== id);
+  if (wasPending) { renderLobby(); return; }               // gave up waiting
   lobby.players = lobby.players.filter((l) => l.id !== id);
   const p = players.find((q) => q.peer === id);
   if (p) {
@@ -1494,8 +1527,14 @@ function clientMessage(m) {
       if (!inGame() && state !== 'results') { state = 'lobby'; showScreen('lobby'); }
       return;
     }
-    case 'busy': case 'full':
-      quitToHome(m.t === 'busy' ? 'That room is in the middle of a match. Try again when it ends.' : 'That room is full.');
+    case 'busy': case 'full': case 'denied':
+      backToRooms(m.t === 'busy' ? 'That room is in the middle of a match. Try again when it ends.'
+        : m.t === 'full' ? 'That room is full.' : 'The host declined your request.');
+      return;
+    case 'accepted':
+      dirStop();
+      mpBusy(true, 'Accepted! Joining the lobby…'); $('btnCancelJoin').classList.add('hidden');
+      sfx.buy();
       return;
     case 'start': {
       if (!Array.isArray(m.assign) || !validMode(m.game) || m.ts !== MODES[m.game].teamSize || !validMap(m.map, m.game)) return;
@@ -1578,7 +1617,11 @@ onNet({
     if (net.mode === 'host') hostMessage(from, m); else if (net.mode === 'client') clientMessage(m);
   },
   leave: hostPeerLeft,
-  closed() { quitToHome('The host left the game.'); },
+  closed() {
+    // still waiting for an answer? just go back to the room list
+    if (state !== 'lobby' && !inGameOrPaused() && state !== 'results') backToRooms('That room closed.');
+    else quitToHome('The host left the game.');
+  },
 });
 function smoothNetPlayers(dt) {
   const k = Math.min(1, dt * 14);
@@ -1902,6 +1945,10 @@ function renderLobby() {
     const team = a.slot >= n ? 1 : 0, you = a.id === net.myId;
     return `<li><i style="background:${TEAMS[team].css}"></i><b>${esc(a.name)}</b>${k === 0 ? '<small>HOST</small>' : ''}${you ? '<small>YOU</small>' : ''}<span style="color:${TEAMS[team].css}">${TEAMS[team].name}</span></li>`;
   }).join('');
+  // join requests (host only): accept or deny each one
+  const reqs = isHost ? lobby.pending : [];
+  $('lobbyReqs').innerHTML = reqs.map((q) => `<div class="req"><b>${esc(q.name)}</b><span class="small">wants to join</span>`
+    + `<button data-acc="${esc(q.id)}">Accept</button><button class="deny" data-deny="${esc(q.id)}">Deny</button></div>`).join('');
   const bots = n * 2 - lobby.players.length;
   $('lobbyBots').textContent = lobby.mode === 'coop'
     ? `Co-op: all players on Blue against ${n} Red bots${lobby.players.length < n ? `, with ${n - lobby.players.length} Blue bot${n - lobby.players.length === 1 ? '' : 's'} helping` : ''}.`
@@ -2130,31 +2177,72 @@ for (const b of document.querySelectorAll('#mpMode button')) {
 }
 function mpBusy(on, msg = '') {
   for (const id of ['btnHost', 'btnJoin']) $(id).disabled = on;
+  for (const b of document.querySelectorAll('#roomList button')) b.disabled = on || b.dataset.off === '1';
   $('mpStatus').textContent = msg;
 }
+// the live list of open rooms
+let roomsSeen = false;
+function renderRooms(rooms) {
+  roomsSeen = true;
+  const list = rooms.filter((r) => r.code !== lobby.code || net.mode !== 'host');
+  $('roomsStatus').textContent = list.length ? `${list.length} open room${list.length === 1 ? '' : 's'} · updates live` : 'Live';
+  if (!list.length) { $('roomList').innerHTML = '<li class="empty">No open rooms right now. Host one and others will see it here.</li>'; return; }
+  const waiting = net.mode === 'client';
+  $('roomList').innerHTML = list.map((r) => {
+    const full = r.n >= r.max, playing = r.st === 'playing', off = full || playing;
+    const mapName = validMap(r.map, r.game) ? mapById(r.map).name : 'Random map';
+    return `<li><div class="rm"><b>${esc(r.name)}'s room</b><small>${MODES[r.game].name} · ${r.mode === 'coop' ? 'Co-op vs bots' : 'Teams'} · ${esc(mapName)}${playing ? ' · in a match' : ''}</small></div>`
+      + `<span class="cnt">${r.n}/${r.max}</span><button data-code="${r.code}" data-name="${esc(r.name)}" data-off="${off ? 1 : 0}" ${off || waiting ? 'disabled' : ''}>${playing ? 'In match' : full ? 'Full' : 'Ask to join'}</button></li>`;
+  }).join('');
+}
+$('roomList').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-code]'); if (!b || b.disabled) return;
+  initAudio(); sfx.click(); askToJoin(b.dataset.code, b.dataset.name);
+});
+async function askToJoin(code, hostName) {
+  if (net.mode) return;
+  mpBusy(true, `Connecting to ${hostName ? hostName + "'s room" : code}…`);
+  try {
+    await netJoin(code);
+    netSend({ t: 'hello', name: myName(), look: myLook() });
+    mpBusy(true, `Asked to join ${hostName ? hostName + "'s room" : 'room ' + code}. Waiting for the host to accept…`);
+    $('btnCancelJoin').classList.remove('hidden');
+  } catch (e) { mpBusy(false, e.message || "Couldn't reach that room."); }
+}
+// a request didn't work out (denied, full, cancelled): back to browsing
+function backToRooms(msg) {
+  netLeave();
+  state = 'home';
+  $('btnCancelJoin').classList.add('hidden');
+  showScreen('mp'); mpBusy(false, msg || '');
+  dirStart(renderRooms);
+}
+nav('btnCancelJoin', () => backToRooms('Request cancelled.'));
 nav('btnMP', () => {
   if (!netAvailable()) { toast("Multiplayer couldn't load. Check your internet connection and reload."); return; }
   mpBusy(false); showScreen('mp');
+  $('btnCancelJoin').classList.add('hidden');
+  if (!roomsSeen) { $('roomsStatus').textContent = 'Looking for rooms…'; $('roomList').innerHTML = '<li class="empty">Looking for open rooms…</li>'; }
+  dirStart(renderRooms);
 });
-nav('mpBack', () => showScreen('home'));
+nav('mpBack', () => { if (net.mode === 'client') netLeave(); dirStop(); roomsSeen = false; showScreen('home'); });
+$('mpPublic').addEventListener('change', () => { listPublic = $('mpPublic').checked; updateListing(); });
 nav('btnHost', async () => {
   mpBusy(true, 'Creating room…');
   try {
     const code = await netHost();
     const game = save.settings.gameMode || 'elim';
-    lobby = { code, mode: hostMode, game, map: mapSel(game), players: [{ id: 'host', name: myName(), look: myLook() }] };
+    lobby = { code, mode: hostMode, game, map: mapSel(game), players: [{ id: 'host', name: myName(), look: myLook() }], pending: [] };
+    listPublic = $('mpPublic').checked;
+    dirStart(() => {});                       // keep the directory link up so the room stays listed
     state = 'lobby'; mpBusy(false); showScreen('lobby');
+    updateListing();
   } catch (e) { mpBusy(false, e.message || "Couldn't create a room."); }
 });
-nav('btnJoin', async () => {
+nav('btnJoin', () => {
   const code = cleanCode(mpCode.value);
   if (code.length !== 5) { mpBusy(false, 'Enter the 5-character room code.'); return; }
-  mpBusy(true, `Joining ${code}…`);
-  try {
-    await netJoin(code);
-    netSend({ t: 'hello', name: myName(), look: myLook() });
-    mpBusy(false, 'Connected. Waiting for the lobby…');
-  } catch (e) { mpBusy(false, e.message || "Couldn't join that room."); }
+  askToJoin(code);
 });
 for (const b of document.querySelectorAll('#lobbyMode button')) {
   b.addEventListener('click', () => {
@@ -2180,6 +2268,12 @@ for (const b of document.querySelectorAll('#lobbyMapPick .arrow')) {
     broadcastLobby();
   });
 }
+$('lobbyReqs').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || net.mode !== 'host') return;
+  initAudio(); sfx.click();
+  if (b.dataset.acc) answerRequest(b.dataset.acc, true);
+  else if (b.dataset.deny) answerRequest(b.dataset.deny, false);
+});
 nav('btnStart', hostStartMatch);
 nav('btnLeave', () => quitToHome());
 nav('btnCopy', async () => {

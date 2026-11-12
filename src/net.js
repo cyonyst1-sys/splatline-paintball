@@ -72,3 +72,120 @@ export function leave() {
   net.conns.clear();
   if (p) try { p.destroy(); } catch (e) { /* ignore */ }
 }
+
+// ---------- room directory (the "open rooms" list) ----------
+// There's no game server, so one browser acts as the directory: whoever first claims the well-known peer id
+// below. Hosts register their room with it and everyone browsing gets the live list. When the directory
+// browser leaves, the others notice the dropped connection and one of them claims the id and takes over;
+// hosts re-register automatically, so the list rebuilds itself within a few seconds.
+const DIR_ID = PREFIX + 'rooms';
+const dir = { on: false, peer: null, conn: null, isDir: false, rooms: [], listeners: new Map(), entries: new Map(),
+  myRoom: null, retryT: null, regT: null, sweepT: null, onRooms() {} };
+const GAMES = ['elim', 'ctf', 'koth'];
+const cleanText = (s, n) => String(s ?? '').replace(/[^\p{L}\p{N} _.-]/gu, '').trim().slice(0, n);
+const int = (x, lo, hi) => (Number.isInteger(x) && x >= lo && x <= hi ? x : null);
+/** Validate a room listing (they come from other browsers). */
+export function cleanRoom(r) {
+  if (!r || typeof r !== 'object') return null;
+  const code = cleanCode(r.code), n = int(r.n, 0, 12), max = int(r.max, 1, 12);
+  if (code.length !== 5 || n === null || max === null || !GAMES.includes(r.game)) return null;
+  return { code, name: cleanText(r.name, 14) || 'Player', game: r.game, map: cleanText(r.map, 20).toLowerCase(),
+    mode: r.mode === 'coop' ? 'coop' : 'teams', n, max, st: r.st === 'playing' ? 'playing' : 'lobby' };
+}
+/** Start following the room list. onRooms(rooms) is called whenever it changes. */
+export function dirStart(onRooms) {
+  if (onRooms) dir.onRooms = onRooms;
+  if (dir.on) { dir.onRooms(dir.rooms); return; }
+  dir.on = true; dirConnect();
+}
+export function dirStop() {
+  dir.on = false; dir.myRoom = null;
+  clearTimeout(dir.retryT); clearInterval(dir.regT); clearInterval(dir.sweepT); dir.regT = dir.sweepT = null;
+  const p = dir.peer;
+  Object.assign(dir, { peer: null, conn: null, isDir: false, rooms: [] });
+  dir.listeners.clear(); dir.entries.clear();
+  if (p) try { p.destroy(); } catch (e) { /* ignore */ }
+}
+/** List (or, with null, unlist) this browser's room. */
+export function dirSetRoom(room) { dir.myRoom = room ? cleanRoom(room) : null; pushReg(); }
+export const dirActive = () => dir.on;
+
+function retry(ms) { clearTimeout(dir.retryT); dir.retryT = setTimeout(dirConnect, ms); }
+async function dirConnect() {
+  if (!dir.on || dir.isDir) return;
+  try { if (!dir.peer || dir.peer.destroyed) dir.peer = await newPeer(); }
+  catch (e) { retry(4000); return; }
+  if (!dir.on) return;
+  const peer = dir.peer;
+  let settled = false;
+  const conn = peer.connect(DIR_ID, { reliable: true });
+  const giveUp = () => { if (settled) return; settled = true; clearTimeout(t); peer.off('error', onErr); try { conn.close(); } catch (e) { /* ignore */ } claim(); };
+  const onErr = (e) => { if (e && e.type === 'peer-unavailable') giveUp(); };
+  const t = setTimeout(giveUp, 6000);
+  peer.on('error', onErr);
+  conn.on('open', () => {
+    if (settled) return; settled = true; clearTimeout(t); peer.off('error', onErr);
+    dir.conn = conn; conn.send({ t: 'list' }); pushReg();
+    if (!dir.regT) dir.regT = setInterval(pushReg, 5000);
+  });
+  conn.on('data', (d) => {
+    if (!d || d.t !== 'rooms' || !Array.isArray(d.rooms)) return;
+    dir.rooms = d.rooms.slice(0, 50).map(cleanRoom).filter(Boolean);
+    dir.onRooms(dir.rooms);
+  });
+  conn.on('close', () => { if (dir.conn === conn) { dir.conn = null; retry(300 + Math.random() * 1700); } });
+  conn.on('error', () => {});
+}
+// nobody is running the directory: try to become it (if someone beats us to it, go back to listening)
+async function claim() {
+  if (!dir.on) return;
+  let p;
+  try { p = await newPeer(DIR_ID); }
+  catch (e) { retry(e && e.type === 'unavailable-id' ? 400 + Math.random() * 1500 : 4000); return; }
+  if (!dir.on) { try { p.destroy(); } catch (e) { /* ignore */ } return; }
+  const old = dir.peer;
+  Object.assign(dir, { isDir: true, peer: p, conn: null });
+  if (old && old !== p) try { old.destroy(); } catch (e) { /* ignore */ }
+  p.on('connection', (c) => {
+    c.on('open', () => { dir.listeners.set(c.peer, c); c.send({ t: 'rooms', rooms: dir.rooms }); });
+    c.on('data', (d) => {
+      if (!d || typeof d !== 'object') return;
+      if (d.t === 'list') { if (c.open) c.send({ t: 'rooms', rooms: dir.rooms }); }
+      else if (d.t === 'reg') {
+        const r = cleanRoom(d.room);
+        if (r) dir.entries.set(c.peer, { r, at: Date.now() }); else dir.entries.delete(c.peer);
+        publish();
+      }
+    });
+    c.on('close', () => { dir.listeners.delete(c.peer); if (dir.entries.delete(c.peer)) publish(); });
+    c.on('error', () => {});
+  });
+  p.on('disconnected', () => { if (dir.peer === p) try { p.reconnect(); } catch (e) { /* ignore */ } });
+  // drop rooms whose host stopped checking in
+  dir.sweepT = setInterval(() => {
+    const now = Date.now(); let changed = false;
+    for (const [k, e] of dir.entries) if (now - e.at > 20000) { dir.entries.delete(k); changed = true; }
+    if (changed) publish();
+  }, 5000);
+  publish();
+}
+let pubT = null;
+function publish() {
+  if (pubT) return;                       // at most a few updates a second
+  pubT = setTimeout(() => {
+    pubT = null;
+    if (!dir.isDir) return;
+    const seen = new Set(), list = [];
+    for (const r of [dir.myRoom, ...[...dir.entries.values()].map((e) => e.r)]) {
+      if (!r || seen.has(r.code) || list.length >= 50) continue;
+      seen.add(r.code); list.push(r);
+    }
+    dir.rooms = list;
+    for (const c of dir.listeners.values()) if (c.open) c.send({ t: 'rooms', rooms: list });
+    dir.onRooms(list);
+  }, 150);
+}
+function pushReg() {
+  if (dir.isDir) publish();
+  else if (dir.conn && dir.conn.open) dir.conn.send({ t: 'reg', room: dir.myRoom });
+}
