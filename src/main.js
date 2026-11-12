@@ -527,7 +527,7 @@ function eliminate(p, by, point, rs) {
   } else if (!local) p.respawnT = rs || 0;
   if (net.mode === 'host') broadcast({ t: 'tag', v: slotIdx(p), b: slotIdx(by), pt: vec(point), rs: p.respawnT });
   if (local && flagsSt) for (const F of flagsSt) if (F.st === 1 && F.carrier === slotIdx(p)) dropFlag(F, p);
-  p.alive = false; p.reload = 0; p.crouch = false; p.lean = 0; p.diveT = 0; p.crawl = false; roleT = 0;
+  p.alive = false; p.outAt = clock; p.reload = 0; p.crouch = false; p.lean = 0; p.diveT = 0; p.crawl = false; roleT = 0;
   const n = new THREE.Vector3(point.x - p.x, 0, point.z - p.z).normalize();
   const d = world.addSplat(point, n, by.team, 0.42, p.model.root); if (d) d.userData.decal = true;
   world.puff(point, by.team);
@@ -1483,7 +1483,7 @@ const cleanName = (s) => String(s ?? '').replace(/[^\p{L}\p{N} _.-]/gu, '').trim
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const packPose = (p) => [p.x, p.z, p.ang, p.bodyAng, p.pitch, p.h, p.lean, p.alive ? 1 : 0, p.vx, p.vz, p.y || 0].map(r3);
 function markOut(p) {
-  p.alive = false; setOutLook(p.model, true);
+  p.alive = false; p.outAt = clock; setOutLook(p.model, true);
   if (p.human) { sfx.out(); specIdx = 0; }
 }
 function packObjectives() {
@@ -1761,6 +1761,7 @@ function update(dt) {
 const ease = (cur, tgt, k) => cur + (tgt - cur) * k;
 // Level of detail for big games: players further than LOD_D from the camera are drawn as simple team-coloured
 // figures (two instanced meshes per team, a handful of draw calls in all) instead of full jointed models.
+const OUT_SHOW = 0.75; // seconds a tagged player stays visible: just long enough to put their hands up
 const LOD_D = 30, IMP = { body: new THREE.CapsuleGeometry(0.21, 1.0, 3, 8).translate(0, 0.86, 0),
   head: new THREE.SphereGeometry(0.135, 10, 8).translate(0, 1.6, 0), meshes: null };
 const impDummy = new THREE.Object3D();
@@ -1780,7 +1781,8 @@ function syncModels(dt) {
     const m = p.model;
     let vis = !(p.human && p.alive && inGameOrPaused());
     if (p.alive && p.protect > 0 && ((clock * 8) | 0) % 2) vis = false; // blink while spawn-protected
-    if (!p.alive && respawnMode() && inGame()) vis = false;          // the tagged walk off: hide them until they respawn
+    // tagged: hands go up, then they're gone (in every mode)
+    if (!p.alive && clock - (p.outAt ?? -1e9) > OUT_SHOW) vis = false;
     // far away in a big game: an instanced stand-in, and the full model leaves the scene entirely
     const far = lod && vis && (p.x - cx) ** 2 + (p.z - cz) ** 2 > LOD_D * LOD_D;
     if (far !== !!m.far) { m.far = far; if (far) scene.remove(m.root); else scene.add(m.root); }
