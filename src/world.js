@@ -655,7 +655,11 @@ export function createWorld(canvas, high) {
     info.map = map; info.mode = mode; info.large = !!map.large; info.flags = null; info.castle = null;
     if (mode === 'ctf' && map.ctf) {
       place(map.ctf, true);
-      info.flags = [{ x: -(FIELD.hw - 7), z: 0 }, { x: FIELD.hw - 7, z: 0 }];
+      info.flags = [{ x: -(FIELD.hw - 7), z: 0 }, { x: FIELD.hw - 7, z: 0 }]; // the two end zones (team 0 starts at the first)
+      // the flag starts on the centre line, at the clear spot nearest the middle (some maps have a bunker there)
+      let fz = 0;
+      for (let k = 0; k <= 60; k++) { const z = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5; if (!insideAny(0, z, 1.1)) { fz = z; break; } }
+      info.flagHome = { x: 0, z: fz };
     }
     if (mode === 'koth' && map.castle) {
       place(map.kothBase || [], false); // cover near the attackers' end

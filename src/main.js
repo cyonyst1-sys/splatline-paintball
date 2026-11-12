@@ -18,7 +18,7 @@ const stubs = {};
 const $ = (id) => document.getElementById(id)
   || stubs[id] || (console.warn(`index.html has no #${id} (stale page?)`), stubs[id] = document.createElement('div'));
 // multiplayer protocol version: players on different versions can't share a room
-const PROTO = 4;
+const PROTO = 5;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -43,11 +43,11 @@ const DIFF = {
 const REWARD = { tag: 25, round: 40, win: 150, play: 30, capture: 60, ret: 15 };
 export const MODES = {
   elim: { name: 'Elimination', desc: "One hit and you're out. First team to win 3 rounds.", teamSize: 4 },
-  ctf: { name: 'Capture the Flag', desc: 'Infinite respawns. Bring their flag to yours. First to 3 captures, or most in 6 min.', teamSize: 6 },
+  ctf: { name: 'Capture the Flag', desc: 'One flag in the middle. Carry it to the far end of the field. First to 3, or most in 6 min.', teamSize: 6 },
   koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 4 lives each. Hold the throne room to win.', teamSize: 6 },
   battle: { name: 'Battle', desc: '20 v 20 in a forest of treehouses and catwalks. One life each: the last team with anyone standing wins.', teamSize: 20 },
 };
-const CTF = { caps: 3, time: 360, returnT: 20, pickR: 1.4, capR: 2.6 };
+const CTF = { caps: 3, time: 360, returnT: 15, pickR: 1.4, capR: 3.2 };
 // attackRespawn: attackers wait longer than defenders, which gives the castle time to regroup
 const KOTH = { time: 240, lives: 4, capSecs: 55, rounds: 2, attackRespawn: 7, defendRespawn: 3 };
 const RESPAWN_T = 4, PROTECT_T = 2.5;
@@ -348,7 +348,7 @@ function spawnFor(p, jitter) {
     }
     return { x: -(FIELD.hw - 3), z: (p.i - (n - 1) / 2) * 3 + jz, y: 0, ang: 0 };
   }
-  // CTF: spawn in the two back corners, well away from your own flag, so a base can actually be raided
+  // CTF: spawn in the two back corners of your own end (the other team scores in the zone at that end)
   if (gameMode === 'ctf') return { x: side * (FIELD.hw - 3 - (p.i >> 1) * 1.6), z: (p.i % 2 ? 1 : -1) * (FIELD.hd - 4) + jz, y: 0, ang: p.team ? Math.PI : 0 };
   return { x: side * (FIELD.hw - 2.5), z: (p.i - (n - 1) / 2) * 3 + jz, y: 0, ang: p.team ? Math.PI : 0 };
 }
@@ -1051,22 +1051,22 @@ function followPath(b, goal, speed, dt) {
 // what a bot should be doing in CTF / King of the Castle: { x, z, rush (keep moving while fighting), hold (stay put) }
 function objectiveFor(b) {
   if (gameMode === 'ctf' && flagsSt) {
-    const me = slotIdx(b), own = flagsSt[b.team], enemy = flagsSt[1 - b.team];
-    if (enemy.st === 1 && enemy.carrier === me) return { x: own.hx, z: own.hz, rush: true, carry: true };
-    if (own.st === 1) { const c = players[own.carrier]; if (b.role === 'defend' || dist(b, c) < 16) return { x: c.x, z: c.z, rush: true }; }
-    if (own.st === 2 && (b.role === 'defend' || dist(b, own) < 14)) return { x: own.x, z: own.z, rush: true };
-    if (b.role === 'attack') {
-      if (enemy.st === 1) { const c = players[enemy.carrier]; return { x: c.x + (b.team ? 2 : -2), z: c.z + (b.i % 2 ? 2.5 : -2.5), rush: true }; }
-      // each life, push up a random lane first (flank, inside or centre), then cut in to the flag
-      if (!b.flankDone) {
-        const fp = { x: enemy.hx * 0.4, z: b.lane * (FIELD.hd - 5) };
-        if (dist(b, fp) < 4) b.flankDone = true; else return { x: fp.x, z: fp.z, rush: true };
-      }
-      return { x: enemy.x, z: enemy.z, rush: true };
+    const F = flagsSt[0], goal = ctfGoal(b.team), theirGoal = ctfGoal(1 - b.team);
+    const c = F.st === 1 ? players[F.carrier] : null;
+    if (c === b) return { x: goal.x, z: goal.z, rush: true, carry: true };              // run it to the far end
+    if (c && c.team === b.team) {                                                         // escort: run just ahead of the carrier
+      const d = Math.hypot(goal.x - c.x, goal.z - c.z) || 1;
+      return { x: c.x + (goal.x - c.x) / d * 5 + (b.i % 2 ? 2.5 : -2.5), z: c.z + (goal.z - c.z) / d * 5 + (b.i % 3 - 1) * 2.5, rush: true };
     }
-    if (!b.defSpot || Math.hypot(b.defSpot.x - own.hx, b.defSpot.z - own.hz) > 14) {
-      const near = world.cover.filter((c) => Math.hypot(c.x - own.hx, c.z - own.hz) < 12);
-      b.defSpot = near.length ? near[(Math.random() * near.length) | 0] : { x: own.hx + (b.team ? -3 : 3), z: own.hz };
+    if (c) {                                                                              // they have it: cut the carrier off
+      if (b.role === 'defend') return { x: (c.x + theirGoal.x) / 2, z: (c.z + theirGoal.z) / 2, rush: true };
+      return { x: c.x, z: c.z, rush: true };
+    }
+    // nobody has it: the attackers go for it (rushing in once they're close), the defender guards the zone they'd score in
+    if (b.role === 'attack') return { x: F.x, z: F.z, rush: dist(b, F) < 16 };
+    if (!b.defSpot || Math.hypot(b.defSpot.x - theirGoal.x, b.defSpot.z - theirGoal.z) > 14) {
+      const near = world.cover.filter((q) => Math.hypot(q.x - theirGoal.x, q.z - theirGoal.z) < 12);
+      b.defSpot = near.length ? near[(Math.random() * near.length) | 0] : { x: theirGoal.x + (b.team ? -3 : 3), z: theirGoal.z };
     }
     return { x: b.defSpot.x, z: b.defSpot.z, hold: true };
   }
@@ -1278,12 +1278,13 @@ function objectiveMove(b, dt, D, obj, want) {
 // ---------- objectives (flags, castle zone) ----------
 const objGroup = new THREE.Group(); scene.add(objGroup);
 let zoneMesh = null, zoneBeam = null;
-function makeFlagMesh(team) {
+// the flag: white while nobody has it, in the carrier's team colour while it's being run
+function makeFlagMesh() {
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.6, roughness: 0.3 }));
   pole.position.y = 1.2; g.add(pole);
-  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.65), new THREE.MeshStandardMaterial({ color: TEAMS[team].color, emissive: TEAMS[team].color, emissiveIntensity: 0.35, side: THREE.DoubleSide }));
-  cloth.position.set(0.5, 2.05, 0); g.add(cloth);
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.65), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.35, side: THREE.DoubleSide }));
+  cloth.position.set(0.5, 2.05, 0); g.add(cloth); g.userData.cloth = cloth;
   const knob = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd23f, metalness: 0.7, roughness: 0.3 }));
   knob.position.y = 2.42; g.add(knob);
   g.traverse((m) => { if (m.isMesh) m.castShadow = high; });
@@ -1293,12 +1294,20 @@ function buildObjectives() {
   for (const c of [...objGroup.children]) { c.traverse((m) => { if (m.isMesh) { m.geometry.dispose(); m.material.dispose(); } }); objGroup.remove(c); }
   zoneMesh = zoneBeam = null; flagsSt = null;
   if (world.info.flags) {
-    flagsSt = world.info.flags.map((h, team) => {
-      const stand = new THREE.Mesh(new THREE.RingGeometry(CTF.capR - 0.25, CTF.capR, 40), new THREE.MeshBasicMaterial({ color: TEAMS[team].color, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
-      stand.rotation.x = -Math.PI / 2; stand.position.set(h.x, 0.03, h.z); objGroup.add(stand);
-      const mesh = makeFlagMesh(team); objGroup.add(mesh);
-      return { team, hx: h.x, hz: h.z, st: 0, carrier: -1, x: h.x, z: h.z, dropT: 0, mesh };
-    });
+    // a scoring zone at each end, in the colour of the team that scores there (the end the other team starts at)
+    for (let team = 0; team < 2; team++) {
+      const g = ctfGoal(team), col = TEAMS[team].color;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(CTF.capR - 0.3, CTF.capR, 48), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(g.x, 0.03, g.z); objGroup.add(ring);
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(CTF.capR, CTF.capR, 3, 40, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+      beam.position.set(g.x, 1.5, g.z); objGroup.add(beam);
+    }
+    // one flag, in the middle of the field
+    const H = world.info.flagHome || { x: 0, z: 0 };
+    const home = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.1, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, side: THREE.DoubleSide }));
+    home.rotation.x = -Math.PI / 2; home.position.set(H.x, 0.03, H.z); objGroup.add(home);
+    const mesh = makeFlagMesh(); objGroup.add(mesh);
+    flagsSt = [{ hx: H.x, hz: H.z, st: 0, carrier: -1, x: H.x, z: H.z, dropT: 0, last: 0, mesh, tint: -2 }];
   }
   const c = world.info.castle;
   if (c) {
@@ -1323,6 +1332,8 @@ function syncObjectives() {
       F.mesh.position.set(F.x, 0, F.z); F.mesh.scale.setScalar(1);
       F.mesh.rotation.set(0, clock * 0.8, F.st === 2 ? 0.35 : 0);
     }
+    const tint = c ? c.team : -1;
+    if (tint !== F.tint) { F.tint = tint; const m = F.mesh.userData.cloth.material, col = tint >= 0 ? TEAMS[tint].color : 0xffffff; m.color.setHex(col); m.emissive.setHex(col); }
   }
   if (zoneMesh) {
     const att = attackers(), col = new THREE.Color(TEAMS[1 - att].color).lerp(new THREE.Color(TEAMS[att].color), koth.progress);
@@ -1332,14 +1343,16 @@ function syncObjectives() {
   }
 }
 function carrying(p) { return !!flagsSt && flagsSt.some((F) => F.st === 1 && F.carrier === slotIdx(p)); }
+// Capture the Flag: a team scores by carrying the flag into the zone at the far end, where the other team starts
+const ctfGoal = (team) => world.info.flags[1 - team];
 function dropFlag(F, c) {
   F.st = 2; F.carrier = -1; F.dropT = CTF.returnT;
-  if (c) { F.x = c.x; F.z = c.z; }
-  objEvent('dropped', F.team, c);
+  if (c) { F.x = c.x; F.z = c.z; F.last = c.team; }
+  objEvent('dropped', F.last, c);
 }
-function returnFlag(F, by) {
+function returnFlag(F) {
   F.st = 0; F.carrier = -1; F.x = F.hx; F.z = F.hz;
-  objEvent('returned', F.team, by);
+  objEvent('returned', F.last, null);
 }
 function objEvent(k, team, p) {
   if (net.mode === 'host') broadcast({ t: 'obj', k, tm: team, by: p ? slotIdx(p) : -1 });
@@ -1348,36 +1361,32 @@ function objEvent(k, team, p) {
 function showFlash(text, color, secs = 3) { flash = { text, color, t: secs }; }
 function onObj(k, team, p) {
   const T = TEAMS[team], P = p ? TEAMS[p.team] : null;
-  if (k === 'taken') { showFlash(`${p.name} took the ${T.name} flag!`, P.css); sfx.beep(); }
-  else if (k === 'dropped') { showFlash(`${T.name} flag dropped`, T.css); }
-  else if (k === 'returned') {
-    showFlash(p ? `${p.name} returned the ${T.name} flag` : `${T.name} flag returned to base`, T.css); sfx.beep();
-    if (p && p.human && earned) { const c = reward(REWARD.ret); earned.obj += c; addCoins(c); popCoins(c, 'RETURN'); }
-  } else if (k === 'captured') {
-    showFlash(`${p.name} captured the ${T.name} flag!`, P.css, 4); sfx.go();
+  if (k === 'taken' && p) { showFlash(`${p.name} has the flag!`, P.css); sfx.beep(); }
+  else if (k === 'dropped') { showFlash('Flag dropped!', '#ffffff'); }
+  else if (k === 'returned') { showFlash('The flag is back in the middle', '#ffffff'); sfx.beep(); }
+  else if (k === 'captured' && p) {
+    showFlash(`${p.name} scored for ${P.name}!`, P.css, 4); sfx.go();
     if (p && p.human && earned) { const c = reward(REWARD.capture); earned.obj += c; addCoins(c); popCoins(c, 'CAPTURE'); }
   } else if (k === 'castle') { showFlash(`${T.name} TOOK THE CASTLE!`, T.css, 4); sfx.go(); }
   else if (k === 'wiped') { showFlash(`${T.name} defenders are out of lives`, T.css, 4); }
   else if (k === 'held') { showFlash(`${T.name} HELD THE CASTLE!`, T.css, 4); sfx.go(); }
 }
 function ctfUpdate(dt) {
-  for (const F of flagsSt) {
-    if (F.st === 1) { const c = players[F.carrier]; if (!c || !c.alive) dropFlag(F, c); else { F.x = c.x; F.z = c.z; } }
-    if (F.st === 2) { F.dropT -= dt; if (F.dropT <= 0) returnFlag(F, null); }
-    if (F.st === 1) continue;
-    for (const p of players) {
-      if (!p.alive || p.y > 1.2 || Math.hypot(p.x - F.x, p.z - F.z) > CTF.pickR) continue;
-      if (p.team !== F.team && !carrying(p)) { F.st = 1; F.carrier = slotIdx(p); objEvent('taken', F.team, p); break; }
-      if (p.team === F.team && F.st === 2) { returnFlag(F, p); break; }
-    }
+  const F = flagsSt[0];
+  if (F.st === 1) { const c = players[F.carrier]; if (!c || !c.alive) dropFlag(F, c); else { F.x = c.x; F.z = c.z; } }
+  if (F.st === 2) { F.dropT -= dt; if (F.dropT <= 0) returnFlag(F); }
+  // anyone can pick it up: from the middle, or wherever it was dropped
+  if (F.st !== 1) for (const p of players) {
+    if (!p.alive || p.protect > 0 || p.y > 1.2 || Math.hypot(p.x - F.x, p.z - F.z) > CTF.pickR) continue;
+    F.st = 1; F.carrier = slotIdx(p); F.last = p.team; objEvent('taken', p.team, p); break;
   }
-  for (const F of flagsSt) {
-    if (F.st !== 1) continue;
-    const c = players[F.carrier], own = flagsSt[c.team];
-    if (own.st === 0 && Math.hypot(c.x - own.hx, c.z - own.hz) < CTF.capR) {
+  // carried into the far end zone: a point, and the flag goes back to the middle
+  if (F.st === 1) {
+    const c = players[F.carrier], g = ctfGoal(c.team);
+    if (Math.hypot(c.x - g.x, c.z - g.z) < CTF.capR) {
       score[c.team]++;
       F.st = 0; F.carrier = -1; F.x = F.hx; F.z = F.hz;
-      objEvent('captured', F.team, c);
+      objEvent('captured', c.team, c);
       if (score[c.team] >= CTF.caps) { endRound(c.team, false); return; }
     }
   }
@@ -1688,7 +1697,7 @@ function clientMessage(m) {
       if (g && typeof g === 'object') {
         if (isNum(g.tl)) timeLeft = g.tl;
         if (Array.isArray(g.lv) && g.lv.length === players.length) g.lv.forEach((l, i) => { if (isNum(l)) players[i].lives = l < 0 ? Infinity : l; });
-        if (flagsSt && Array.isArray(g.f) && g.f.length === 2) g.f.forEach((a, i) => {
+        if (flagsSt && Array.isArray(g.f) && g.f.length === flagsSt.length) g.f.forEach((a, i) => {
           if (!Array.isArray(a) || a.length !== 4 || !a.every(isNum) || ![0, 1, 2].includes(a[0])) return;
           if (a[0] === 1 && !okSlot(a[1])) return;
           Object.assign(flagsSt[i], { st: a[0], carrier: a[1], x: a[2], z: a[3] });
@@ -1997,7 +2006,6 @@ function setFov(f, dt) {
 }
 
 // ---------- HUD ----------
-const FLAG_WORD = ['AT BASE', 'TAKEN', 'DROPPED'];
 const markerEls = [];
 function marker(i, pos, label, color) {
   let el = markerEls[i];
@@ -2027,17 +2035,15 @@ function renderHud() {
   let obj = '';
   const used = new Set();
   if (gameMode === 'ctf' && flagsSt) {
-    obj = flagsSt.map((F) => {
-      const who = F.st === 1 ? ` (${esc(players[F.carrier].name)})` : F.st === 2 ? ` · ${Math.ceil(F.dropT || 0) || ''}` : '';
-      return `<span style="color:${TEAMS[F.team].css}">🚩 ${TEAMS[F.team].name}: ${FLAG_WORD[F.st]}${F.st === 1 ? who : ''}</span>`;
-    }).join('');
-    flagsSt.forEach((F, i) => {
-      if (F.st === 1 && F.carrier === slotIdx(h)) return;
-      const c = F.st === 1 ? players[F.carrier] : null;
-      marker(i, { x: c ? c.x : F.x, y: (c ? c.y || 0 : 0) + 2.6, z: c ? c.z : F.z }, F.team === h.team ? 'YOUR FLAG' : 'ENEMY FLAG', TEAMS[F.team].css);
-      used.add(i);
-    });
-    if (carrying(h)) { const own = flagsSt[h.team]; marker(2, { x: own.hx, y: 2.6, z: own.hz }, 'BRING IT HOME', '#ffd23f'); used.add(2); }
+    const F = flagsSt[0], c = F.st === 1 ? players[F.carrier] : null, goal = ctfGoal(h.team);
+    obj = c ? `<span style="color:${TEAMS[c.team].css}">🚩 ${esc(c.name)} (${TEAMS[c.team].name}) has the flag</span>`
+      : `<span>🚩 Flag ${F.st === 2 ? `dropped · back in ${Math.ceil(F.dropT || 0)}` : 'in the middle'}</span>`;
+    if (c !== h) {
+      const label = !c ? 'GET THE FLAG' : c.team === h.team ? 'ESCORT' : 'STOP THEM';
+      marker(0, { x: F.x, y: (c ? c.y || 0 : 0) + 2.6, z: F.z }, label, c ? TEAMS[c.team].css : '#ffffff'); used.add(0);
+    }
+    // your scoring zone, at the far end of the field
+    marker(1, { x: goal.x, y: 2.6, z: goal.z }, c === h ? 'SCORE HERE' : 'YOUR GOAL', c === h ? '#ffd23f' : TEAMS[h.team].css); used.add(1);
   } else if (gameMode === 'koth' && world.info.castle) {
     const att = attackers(), zn = world.info.castle.zone, pct = Math.round(koth.progress * 100);
     const lives = players.filter((p) => p.team !== att).reduce((s, p) => s + (p.lives === Infinity ? 0 : p.lives), 0);
