@@ -645,8 +645,9 @@ export const CASTLE_H1 = 3.2, CASTLE_H2 = 6.4;
 export function castlePlan() {
   // Parapets stand 1 m above the wall-walk and roof: stand up to shoot over them, crouch to hide behind them.
   const P = [], H1 = CASTLE_H1, H2 = CASTLE_H2, OW = H1 + 1.0, KW = H2 + 1.0, PI2 = PI / 2;
-  // arrow slits at standing eye height on the ground floor and the keep's 2nd floor
-  const outerBands = [[1.15, 1.75]], keepBands = [[1.15, 1.75], [4.35, 4.95]];
+  // big windows (1.1 m wide): on the ground floor from knee to head height (shoot standing or crouched),
+  // and on the keep's 2nd floor with a low sill, so you can aim out and well down at the yard below
+  const outerBands = [[0.75, 1.95]], keepBands = [[0.75, 1.95], [H1 + 0.45, H1 + 2.1]];
   const wall = (x, z, rot, w, d, y0, y1, bands, crenel = true) => P.push({ type: 'wall', x, z, rot, w, d, y0, y1, bands, crenel });
   const floor = (x, z, w, d, top) => P.push({ type: 'floor', x, z, rot: 0, w, d, top });
   const ramp = (x, z, rot, w, d, h0, h1) => P.push({ type: 'ramp', x, z, rot, w, d, h0, h1, base: Math.min(h0, h1) });
@@ -674,9 +675,18 @@ export function castlePlan() {
     wall(sx, 0, PI2, 3, 0.8, 2.6, KW, keepBands.slice(1)); // above the door
   }
   for (const s of [-1, 1]) wall(5, s * 8, 0, 14.8, 0.8, 0, KW, keepBands);
-  // 2nd floor with a stairwell over ramp 1; roof with a stairwell over ramp 2
-  floor(5, -1.2, 13.2, 12.8, H1); floor(0.7, 6.4, 4.6, 2.4, H1);
-  floor(5, 1.2, 13.2, 12.8, H2); floor(0.7, -6.4, 4.6, 2.4, H2); floor(11.1, -6.4, 1, 2.4, H2);
+  // 2nd floor with a stairwell over ramp 1; roof with a stairwell over ramp 2.
+  // Both have a 4 x 4 m open shaft straight over the throne room: shoot down into it, or jump down to defend it.
+  // (each floor is built as four pieces around the shaft)
+  const SX0 = 4.4, SX1 = 8.4, SZ0 = -3, SZ1 = 1; // the shaft
+  const floorAround = (x0, x1, z0, z1, top) => {
+    floor((x0 + SX0) / 2, (z0 + z1) / 2, SX0 - x0, z1 - z0, top);            // west of the shaft
+    floor((SX1 + x1) / 2, (z0 + z1) / 2, x1 - SX1, z1 - z0, top);            // east
+    floor((SX0 + SX1) / 2, (z0 + SZ0) / 2, SX1 - SX0, SZ0 - z0, top);        // south
+    floor((SX0 + SX1) / 2, (SZ1 + z1) / 2, SX1 - SX0, z1 - SZ1, top);        // north
+  };
+  floorAround(-1.6, 11.6, -7.6, 5.2, H1); floor(0.7, 6.4, 4.6, 2.4, H1);
+  floorAround(-1.6, 11.6, -5.2, 7.6, H2); floor(0.7, -6.4, 4.6, 2.4, H2); floor(11.1, -6.4, 1, 2.4, H2);
   ramp(6.8, 6.4, PI, 7.6, 2.4, 0, H1);   // ground -> 2nd floor (north side, rising toward the front)
   ramp(6.8, -6.4, 0, 7.6, 2.4, H1, H2);  // 2nd floor -> roof (south side, rising toward the back)
   for (const [x, z] of [[0.5, -4], [0.5, 3.5], [9.5, -3.6]]) P.push({ type: 'pillar', x, z, r: 0.45, h: H1 });
@@ -685,13 +695,13 @@ export function castlePlan() {
   return {
     parts: P,
     zone: { x: 6.4, z: -1, r: 3.2 }, // the throne room, on the keep's ground floor
-    // ways down for defenders rushing to the throne room: the stairwells over each ramp, and the keep's footprint
-    // (roof: head for the bottom of ramp 2, so you drop onto it and walk down to the 2nd floor)
-    holes: { roof: { x: 3.8, z: -6.4 }, floor2: { x: 8, z: 6.4 } }, keep: { x: 5, z: 0, hw: 7.5, hd: 8.5 },
-    // where defenders spawn and hold: wall-walks, 2nd-floor windows, roof, throne room
+    // ways down for defenders rushing to the throne room: straight down the shaft over it (from the roof or the 2nd floor)
+    holes: { roof: { x: (SX0 + SX1) / 2, z: (SZ0 + SZ1) / 2 }, floor2: { x: (SX0 + SX1) / 2, z: (SZ0 + SZ1) / 2 } },
+    keep: { x: 5, z: 0, hw: 7.5, hd: 8.5 }, shaft: { x0: SX0, x1: SX1, z0: SZ0, z1: SZ1 },
+    // where defenders spawn and hold: wall-walks, 2nd-floor windows, the edges of the shaft, roof, throne room
     // (hunker: spots behind a 1 m parapet, where crouching keeps your body hidden while you can still see over)
-    defend: [{ x: -12.5, z: -9, y: H1, hunker: true }, { x: -12.5, z: 9, y: H1, hunker: true }, { x: -0.8, z: -3, y: H1 }, { x: -0.8, z: 3, y: H1 },
-      { x: -0.8, z: 0.5, y: H2, hunker: true }, { x: 9.5, z: 3, y: 0 }],
+    defend: [{ x: -12.5, z: -9, y: H1, hunker: true }, { x: -12.5, z: 9, y: H1, hunker: true }, { x: -0.8, z: -3.5, y: H1 }, { x: -0.8, z: 3.5, y: H1 },
+      { x: -0.8, z: 0.5, y: H2, hunker: true }, { x: 9.5, z: 3, y: 0 }, { x: SX0 - 0.7, z: -1, y: H1 }, { x: (SX0 + SX1) / 2, z: SZ1 + 0.8, y: H2 }],
     // courtyard cover, built in the map's own bunker style
     yard: [['wall', -9, -5, PI2], ['wall', -9, 5, PI2], ['tall', -6, -12.5], ['tall', -6, 12.5], ['block', -11, 0], ['can', 9, -12], ['can', 9, 12]],
   };
@@ -708,7 +718,7 @@ function rampGeo(L, D, h0, h1, base) {
   return g;
 }
 function wallPieces(kit, m, L, D, y0, y1, bands, crenel) {
-  const spacing = 2.4, holeW = 0.32;
+  const spacing = 2.4, holeW = 1.1; // windows: 1.1 m wide, one every 2.4 m
   let y = y0;
   for (const [a, b] of bands.filter(([a, b]) => a >= y0 && b <= y1).sort((p, q) => p[0] - q[0])) {
     if (a > y) kit.add(m, G.box, 0, (y + a) / 2, 0, L, a - y, D);

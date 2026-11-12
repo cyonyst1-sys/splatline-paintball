@@ -43,11 +43,11 @@ const REWARD = { tag: 25, round: 40, win: 150, play: 30, capture: 60, ret: 15 };
 export const MODES = {
   elim: { name: 'Elimination', desc: "One hit and you're out. First team to win 3 rounds.", teamSize: 4 },
   ctf: { name: 'Capture the Flag', desc: 'Infinite respawns. Bring their flag to yours. First to 3 captures, or most in 6 min.', teamSize: 6 },
-  koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 5 lives each. Hold the throne room to win.', teamSize: 6 },
+  koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 4 lives each. Hold the throne room to win.', teamSize: 6 },
 };
 const CTF = { caps: 3, time: 360, returnT: 20, pickR: 1.4, capR: 2.6 };
 // attackRespawn: attackers wait longer than defenders, which gives the castle time to regroup
-const KOTH = { time: 240, lives: 5, capSecs: 55, rounds: 2, attackRespawn: 9, defendRespawn: 3 };
+const KOTH = { time: 240, lives: 4, capSecs: 55, rounds: 2, attackRespawn: 7, defendRespawn: 3 };
 const RESPAWN_T = 4, PROTECT_T = 2.5;
 
 // ---------- characters ----------
@@ -1036,7 +1036,7 @@ function updateBot(b, dt) {
     const react = D.react + (respawnMode() ? (castleDef ? 0 : 0.25) : 0);
     if (b.seen > react && b.cd <= 0 && b.reload <= 0 && Math.abs(da) < 0.2) {
       // paintballs wander more over long distances; respawn modes are a bit looser so attacks can get through
-      const err = D.err * (1 + Math.max(0, td - 12) / 20) * (castleDef ? 0.85 : respawnMode() ? 1.35 : 1);
+      const err = D.err * (1 + Math.max(0, td - 12) / 20) * (castleDef ? 1 : respawnMode() ? 1.35 : 1);
       const yaw = b.ang + gauss() * err, pitch = b.pitch + gauss() * err * 0.6;
       const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
       const pos = new THREE.Vector3(b.x + me.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + me.z + Math.sin(b.ang) * 0.55);

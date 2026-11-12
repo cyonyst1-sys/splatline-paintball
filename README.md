@@ -72,7 +72,7 @@ Pick a mode on the home screen (the host picks it in multiplayer).
 | --- | --- | --- | --- |
 | Elimination | 4 v 4 | the 10 small maps | One hit and you're out. First team to win 3 rounds. |
 | Capture the Flag | 6 v 6 | the 3 large maps | Infinite respawns (6 s, with spawn protection). Grab the enemy flag and bring it to your own flag stand while your flag is home. A carrier who's tagged drops it; touch your own dropped flag to send it home (it also returns by itself after 20 s). First to 3 captures, or the most after 6 minutes. |
-| King of the Castle | 6 v 6 | the 3 large maps | Attackers respawn forever (9 s wait); defenders start inside the castle with 5 lives each (3 s wait). Attackers win by holding the throne room on the keep's ground floor for 55 s (faster with up to 3 attackers inside, paused while a defender is in the room, and wound back quickly by defenders standing in it), or by using up every defender life. Defenders win if the 4-minute clock runs out. Two rounds with teams swapping; a 1–1 tie goes to the faster capture. |
+| King of the Castle | 6 v 6 | the 3 large maps | Attackers respawn forever (7 s wait); defenders start inside the castle with 4 lives each (3 s wait). Attackers win by holding the throne room on the keep's ground floor for 55 s (faster with up to 3 attackers inside, paused while a defender is in the room, and wound back quickly by defenders standing in it), or by using up every defender life. Defenders win if the 4-minute clock runs out. Two rounds with teams swapping; a 1–1 tie goes to the faster capture. |
 
 ### The castle
 
@@ -82,7 +82,8 @@ The castle in King of the Castle is about 31 × 39 m and has real height you can
 - Wall-walks along the tops of the walls, reached by ramps from the courtyard.
 - A three-level keep (ground floor, 2nd floor, roof) with ramps inside between floors.
 - Waist-high parapets (1 m) on the wall-walks and keep roof with low, gappy battlements: stand up to shoot over the walls, crouch to hide behind them with your eyes just over the top.
-- Arrow slits at standing eye height in the ground-floor walls and the keep's 2nd floor.
+- Big windows (1.1 m wide): knee-to-head height on the ground floor, and on the keep's 2nd floor with a low sill so you can aim out and down at the yard below.
+- An open 4 × 4 m shaft through the keep's roof and 2nd floor, straight over the throne room: shoot down into it, or jump down it to defend (bot defenders do too).
 - The throne room, the zone attackers must hold, is on the keep's ground floor.
 
 ## Maps
