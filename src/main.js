@@ -6,6 +6,7 @@ import { sfx, initAudio, setListener, setVolume } from './audio.js';
 import { makeMarker, disposeMarker, cycleMarker, animateMarker } from './marker.js';
 import { mapById, mapsFor } from './maps.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   net, onNet, available as netAvailable, host as netHost, join as netJoin, send as netSend,
   broadcast, sendTo, kick, leave as netLeave, cleanCode, dirStart, dirStop, dirSetRoom,
@@ -116,9 +117,12 @@ function jerseyMat(team, pattern) {
   g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, 0, 256, 10);       // collar
   g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(0, 246, 256, 10);     // hem
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  return (jerseyCache[key] = new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 }));
+  // a soft glow so the team colour still pops in shade and at a distance
+  return (jerseyCache[key] = new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.4 }));
 }
-const sleeveMat = TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.8 }));
+const sleeveMat = TEAMS.map((t) => new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.8, emissive: t.color, emissiveIntensity: 0.4 }));
+// team-coloured pants (a deeper shade of the jersey), so the whole body reads as the team colour
+const pantsMat = TEAMS.map((t) => { const c = new THREE.Color(t.color).lerp(new THREE.Color(0x15171c), 0.35); return new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, emissive: c, emissiveIntensity: 0.25 }); });
 function maskMats(id) {
   if (maskCache[id]) return maskCache[id];
   const it = ITEMS.mask[id] || ITEMS.mask.black;
@@ -145,7 +149,7 @@ const DEFAULT_LOOK = { marker: 'tourney', hopper: 'agitated', jersey: 'classic',
 function makeModel(team, look = DEFAULT_LOOK) {
   const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
   const pelvis = new THREE.Group(); pelvis.position.y = LIMB.hip; body.add(pelvis);
-  pelvis.add(mesh(G.hips, M.pants, 0, 0.02, 0));
+  pelvis.add(mesh(G.hips, pantsMat[team], 0, 0.02, 0));
   // pod pack on the back of the belt
   pelvis.add(mesh(G.belt, M.belt, 0, 0.06, 0));
   for (let i = 0; i < 4; i++) {
@@ -155,9 +159,9 @@ function makeModel(team, look = DEFAULT_LOOK) {
   const legs = [];
   for (const s of [-1, 1]) {
     const hip = new THREE.Group(); hip.position.set(0, -0.04, s * 0.095); pelvis.add(hip);
-    hip.add(mesh(G.thigh, M.pants));
+    hip.add(mesh(G.thigh, pantsMat[team]));
     const knee = new THREE.Group(); knee.position.y = -LIMB.thigh; hip.add(knee);
-    knee.add(mesh(G.shin, M.pants));
+    knee.add(mesh(G.shin, pantsMat[team]));
     const ankle = new THREE.Group(); ankle.position.y = -LIMB.shin; knee.add(ankle);
     ankle.add(mesh(G.foot, M.shoe));
     legs.push({ hip, knee, ankle });
@@ -648,7 +652,7 @@ function pickCover(b, target, threat, o, relax) {
     if (taken.some((g) => Math.hypot(g.x - c.x, g.z - c.z) < 1.8)) continue;
     const prog = fd - Math.hypot(target.x - c.x, target.z - c.z);
     if (prog < minProg) continue;
-    cands.push({ c, s: prog - dB * 0.3 + Math.random() * 3 });
+    cands.push({ c, s: prog * 0.6 - dB * 0.35 + Math.random() * 3 });
   }
   cands.sort((a, b2) => b2.s - a.s);
   let best = null, bs = -1e9;
@@ -656,9 +660,11 @@ function pickCover(b, target, threat, o, relax) {
     let sc = s;
     if (threat) {
       const ty = eyeY(threat), dT = Math.hypot(threat.x - c.x, threat.z - c.z);
-      if (losClear(threat.x, ty, threat.z, c.x, 1.0, c.z)) sc -= 14;           // can't even hide crouched here
-      else if (!losClear(threat.x, ty, threat.z, c.x, 1.55, c.z)) sc += 2;     // hides you standing up too
-      if (dT < 5) sc -= 8;
+      if (losClear(threat.x, ty, threat.z, c.x, 1.0, c.z)) sc -= 30;           // can't even hide crouched here: avoid
+      else if (!losClear(threat.x, ty, threat.z, c.x, 1.55, c.z)) sc += 4;     // hides you standing up too
+      if (dT < 5) sc -= 10;
+      // the run there: a long sprint across their view is risky
+      if (losClear(threat.x, ty, threat.z, (b.x + c.x) / 2, 1.2, (b.z + c.z) / 2)) sc -= Math.hypot(c.x - b.x, c.z - b.z) * 0.5;
       if (o.keepAway && dT < o.keepAway) sc -= 10;
     }
     if (sc > bs) { bs = sc; best = c; }
@@ -680,9 +686,12 @@ function coverAdvance(b, dt, D, target, foes, o) {
     // the break: off the start, run straight to this role's first bunker
     const brk = o.breakout && !b.brokeOut && roundTime < 4 ? pickBreakout(b, o) : null;
     if (o.breakout) b.brokeOut = true;
-    cv.spot = brk || (o.fixed ? { x: o.fixed.x, z: o.fixed.z } : pickCover(b, target, threat, o, false) || (o.push ? null : pickCover(b, target, threat, o, true)));
+    // only walk straight at them with no cover in the respawn modes, or once the team is really pushing;
+    // otherwise always look for the next bunker (even a sideways one) or stay put and fight from here
+    const pushing = o.push && (respawnMode() || lateRound() || teamPlan[b.team] === 'push');
+    cv.spot = brk || (o.fixed ? { x: o.fixed.x, z: o.fixed.z } : pickCover(b, target, threat, o, false) || (pushing ? null : pickCover(b, target, threat, o, true)));
     cv.open = false; cv.willDive = Math.random() < (o.dive || 0);
-    if (!cv.spot && !o.push) { cv.spot = { x: b.x, z: b.z }; cv.open = true; } // nowhere better: stay and fight from here
+    if (!cv.spot && !pushing) { cv.spot = { x: b.x, z: b.z }; cv.open = true; } // nowhere better: stay and fight from here
     cv.mode = 'move'; cv.t = 7; b.stuckT = 0; b.lx = b.x; b.lz = b.z;
   }
   if (cv.mode === 'move') {
@@ -798,9 +807,9 @@ function pickBreakout(b, o) {
 const ROLE = {
   back:   { hold: [7, 12], step: 6, keepAway: 20, suppress: 1, rope: 0.5, dive: 0, fast: 0.85, patient: true,
             budget: 0, budgetLate: 1, breakout: [14, 22, 10, 0.15], peek: [2.5, 4.5], duck: [0.4, 0.9], lanes: 'run', mag: 40 },
-  mid:    { hold: [4.5, 8], step: 8, keepAway: 11, suppress: 0.5, rope: 0.75, dive: 0.35, patient: true,
+  mid:    { hold: [6, 11], step: 8, keepAway: 11, suppress: 0.5, rope: 0.75, dive: 0.35, patient: true,
             budget: 2, breakout: [7, 14, 13, 0], zFollow: true, lanes: true },
-  front:  { hold: [3, 6], step: 9, keepAway: 3, push: true, suppress: 0.2, rope: 1, dive: 0.85, fast: 1.15, patient: true,
+  front:  { hold: [4.5, 8], step: 8, keepAway: 3, push: true, suppress: 0.2, rope: 1, dive: 0.85, fast: 1.15, patient: true,
             budget: 1, breakout: [0.8, 6.5, 9, 0.4] },
   anchor: { hold: [6, 10], step: 7, keepAway: 22, suppress: 0.6, rope: 0.7, dive: 0.15, retreat: true, patient: true },
   snake:  { suppress: 0.3, rope: 0.9 },
@@ -823,11 +832,11 @@ function ownSnake(team, b) {
   return best;
 }
 // Battle's field is four times as big: the same roles move up further before the round is "late"
-const BATTLE_BUDGET = { back: 3, mid: 8, front: 6 };
+const BATTLE_BUDGET = { back: 2, mid: 5, front: 4 };
 function roleParams(role) {
   const R = ROLE[role];
   if (gameMode !== 'battle' || !R.breakout) return R;
-  return R.battle || (R.battle = { ...R, step: R.step * 1.6, budget: BATTLE_BUDGET[role], budgetLate: 0 });
+  return R.battle || (R.battle = { ...R, step: R.step * 1.35, budget: BATTLE_BUDGET[role], budgetLate: 0 });
 }
 // What a team does depends on the numbers: up by 2+ → push, down by 2+ (or alone against several) → defend.
 function assignRoles(team) {
@@ -850,7 +859,7 @@ function assignRoles(team) {
   if (n <= 4) roles = sets[plan][n - 1].slice();
   else {
     // big teams (Battle): the same idea as a percentage mix, plus a snake player for each of your snakes (up to 3)
-    const mix = { even: { back: 0.25, front: 0.25 }, behind: { back: 0.3, front: 0.1 }, push: { back: 0.15, front: 0.5 }, defend: { back: 0.3, anchor: 0.6 } }[plan];
+    const mix = { even: { back: 0.3, front: 0.15 }, behind: { back: 0.35, front: 0.05 }, push: { back: 0.2, front: 0.35 }, defend: { back: 0.3, anchor: 0.6 } }[plan];
     roles = [];
     for (const [r, f] of Object.entries(mix)) for (let k = 0; k < Math.round(n * f); k++) roles.push(r);
     if (plan !== 'defend') for (let k = 0; k < Math.min(3, snakesHere); k++) roles.push('snake');
@@ -1830,23 +1839,51 @@ function update(dt) {
   world.update(dt, clock);
 }
 const ease = (cur, tgt, k) => cur + (tgt - cur) * k;
-// Level of detail for big games: players further than LOD_D from the camera are drawn as simple team-coloured
-// figures (two instanced meshes per team, a handful of draw calls in all) instead of full jointed models.
+// Every player is drawn as the full model at any distance. Players far from the camera skip the shadow pass
+// (their shadow is a few pixels anyway), which keeps big games smooth.
 const OUT_SHOW = 0.75; // seconds a tagged player stays visible: just long enough to put their hands up
-const LOD_D = 30, IMP = { body: new THREE.CapsuleGeometry(0.21, 1.0, 3, 8).translate(0, 0.86, 0),
-  head: new THREE.SphereGeometry(0.135, 10, 8).translate(0, 1.6, 0), meshes: null };
-const impDummy = new THREE.Object3D();
-function impostors() {
-  if (IMP.meshes) return IMP.meshes;
-  return (IMP.meshes = TEAMS.map((t, k) => {
-    const body = new THREE.InstancedMesh(IMP.body, sleeveMat[k], 64), head = new THREE.InstancedMesh(IMP.head, M.glove, 64);
-    for (const im of [body, head]) { im.count = 0; im.frustumCulled = false; scene.add(im); }
-    return { body, head };
-  }));
+const SHADOW_D = 45, DETAIL_D = 30;
+// Far away the marker's moving parts and tiny details (pods, straps) are a pixel or two: the marker becomes one
+// merged copy (a few draw calls instead of ~23) and the tiny bits are hidden. The body, jersey, mask and
+// pose are untouched, so the player looks the same.
+function setDetail(m, far) {
+  m.far = far;
+  if (!m.small) {
+    m.small = [];
+    m.root.traverse((o) => {
+      if (!o.isMesh || m.gun === o || o.parent === m.gun || isInGun(m, o)) return;
+      if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) < 0.05) m.small.push(o);
+    });
+  }
+  if (far && !m.farGun) {
+    m.gun.updateMatrixWorld(true);
+    const inv = m.gun.matrixWorld.clone().invert(), geos = [];
+    m.gun.traverse((o) => {
+      if (!o.isMesh || !o.visible) return;
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal'].includes(k)) g.deleteAttribute(k);
+      g.morphAttributes = {}; g.clearGroups();
+      if (!g.attributes.normal) g.computeVertexNormals();
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+      // each part's colour goes into the vertices, so the whole marker is one mesh
+      const c = o.material.color || FAR_WHITE, n = g.attributes.position.count, col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geos.push(g);
+    });
+    const g = mergeGeometries(geos, false); geos.forEach((q) => q.dispose());
+    m.farGun = new THREE.Mesh(g, FAR_GUN_MAT); m.farGun.userData.far = true;
+    m.gunParts = []; m.gun.traverse((o) => { if (o.isMesh) m.gunParts.push(o); });
+    m.gun.add(m.farGun);
+  }
+  for (const o of m.small) o.visible = !far;
+  if (m.farGun) { for (const o of m.gunParts) o.visible = !far; m.farGun.visible = far; }
 }
+const FAR_WHITE = new THREE.Color(0xffffff), FAR_GUN_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.3 });
+const isInGun = (m, o) => { for (let q = o.parent; q; q = q.parent) if (q === m.gun) return true; return false; };
 function syncModels(dt) {
   const k = Math.min(1, dt * 12);
-  const lod = players.length > 16, imp = lod || IMP.meshes ? impostors() : null, n = [0, 0];
   const cx = camera.position.x, cz = camera.position.z;
   for (const p of players) {
     const m = p.model;
@@ -1854,23 +1891,14 @@ function syncModels(dt) {
     if (p.alive && p.protect > 0 && ((clock * 8) | 0) % 2) vis = false; // blink while spawn-protected
     // tagged: hands go up, then they're gone (in every mode)
     if (!p.alive && clock - (p.outAt ?? -1e9) > OUT_SHOW) vis = false;
-    // far away in a big game: an instanced stand-in, and the full model leaves the scene entirely
-    const far = lod && vis && (p.x - cx) ** 2 + (p.z - cz) ** 2 > LOD_D * LOD_D;
-    if (far !== !!m.far) { m.far = far; if (far) scene.remove(m.root); else scene.add(m.root); }
-    if (far) {
-      if (p.alive) {
-        impDummy.position.set(p.x, p.y || 0, p.z); impDummy.rotation.set(0, -p.bodyAng, 0); impDummy.scale.set(1, p.h / H_STAND, 1);
-        impDummy.updateMatrix();
-        imp[p.team].body.setMatrixAt(n[p.team], impDummy.matrix); imp[p.team].head.setMatrixAt(n[p.team], impDummy.matrix); n[p.team]++;
-      }
-      continue;
-    }
     m.root.visible = vis;
     animateMarker(m.gun, dt);
     if (!vis) continue;
+    const d2 = (p.x - cx) ** 2 + (p.z - cz) ** 2, far = d2 > SHADOW_D * SHADOW_D, lowDetail = d2 > DETAIL_D * DETAIL_D;
+    if (far !== !!m.noShadow) { m.noShadow = far; m.root.traverse((o) => { if (o.isMesh) o.castShadow = high && !far; }); }
+    if (lowDetail !== !!m.far) setDetail(m, lowDetail);
     poseModel(m, p, dt, k);
   }
-  if (imp) for (let t = 0; t < 2; t++) for (const im of [imp[t].body, imp[t].head]) { im.count = n[t]; im.instanceMatrix.needsUpdate = true; }
   if (vmMarker) animateMarker(vmMarker, dt);
 }
 // the whole-body pose: legs from movement, crouch and dive from height, spine from aim and lean, arms by IK

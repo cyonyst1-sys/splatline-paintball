@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Splatline Paintball</title>
-<meta name="build" content="20261112181908">
+<meta name="build" content="20261112183815">
 <script>
 // Stale-page guard. GitHub Pages lets browsers keep this page for up to 10 minutes, and an old copy of the
 // page mixed with newer game files breaks aiming and shooting. version.json is always fetched fresh; if it
@@ -34,7 +34,7 @@ window.splatVersion.check();
 <style>
   :root {
     --ink:#f4f7f4; --muted:#a9b6ad; --glass:rgba(12,16,20,.78); --line:rgba(255,255,255,.1);
-    --blue:#2f7dff; --red:#ff4058; --gold:#ffcc33; --accent:#ffd23f; --green:#35d07f;
+    --blue:#2ee8ff; --red:#ff2f9e; --gold:#ffcc33; --accent:#ffd23f; --green:#35d07f;
   }
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; overflow:hidden; background:#0b0f0c; color:var(--ink); font-family:Inter,system-ui,sans-serif; }
@@ -248,13 +248,13 @@ window.splatVersion.check();
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "./src/main.js": "./src/main.js?v=20261112181908",
-  "./src/world.js": "./src/world.js?v=20261112181908",
-  "./src/maps.js": "./src/maps.js?v=20261112181908",
-  "./src/marker.js": "./src/marker.js?v=20261112181908",
-  "./src/economy.js": "./src/economy.js?v=20261112181908",
-  "./src/audio.js": "./src/audio.js?v=20261112181908",
-  "./src/net.js": "./src/net.js?v=20261112181908"
+  "./src/main.js": "./src/main.js?v=20261112183815",
+  "./src/world.js": "./src/world.js?v=20261112183815",
+  "./src/maps.js": "./src/maps.js?v=20261112183815",
+  "./src/marker.js": "./src/marker.js?v=20261112183815",
+  "./src/economy.js": "./src/economy.js?v=20261112183815",
+  "./src/audio.js": "./src/audio.js?v=20261112183815",
+  "./src/net.js": "./src/net.js?v=20261112183815"
 } }
 </script>
 </head>
@@ -408,7 +408,7 @@ window.splatVersion.check();
     <p><b>Elimination</b> (4 v 4, small fields): one paintball hit and you're out for the round. First team to win 3 rounds takes the match.</p>
     <p><b>Capture the Flag</b> (6 v 6, large fields): infinite respawns. Grab the enemy flag and bring it to your own flag stand while your flag is home. Get tagged carrying it and it drops; touch your own dropped flag to send it home (it also returns by itself after 20 s). First to 3 captures, or the most after 6 minutes.</p>
     <p><b>King of the Castle</b> (6 v 6, large fields): attackers respawn forever (7 s); defenders start inside the castle with 4 lives each (3 s respawns). Attackers win by holding the throne room on the keep's ground floor for 55 s (or knocking out every defender life); defenders win if the 4-minute clock runs out. Two rounds, teams swap. The castle has wall-walks, a three-level keep with ramps, big windows you can shoot out of (and down from, on the 2nd floor), and an open shaft over the throne room: shoot straight down into it, or jump down it to defend. Its parapets are waist high: stand up to shoot over the walls, crouch to hide behind them with just your eyes over the top.</p>
-    <p><b>Battle</b> (20 v 20, the 200 × 120 m Frontline Valley): one life each, no respawns. The last team with anyone still standing wins. The field is a forest: climb the stairs into the treehouse forts on each half (a deck with a solid parapet, and a hut with windows above it), cross the catwalks, or fight over the bridge of platforms across the middle. Bots play back, mid, front, snake and tower roles; far-away players are drawn as simple figures to keep it smooth.</p>
+    <p><b>Battle</b> (20 v 20, the 200 × 120 m Frontline Valley): one life each, no respawns. The last team with anyone still standing wins. The field is a forest: climb the stairs into the treehouse forts on each half (a deck with a solid parapet, and a hut with windows above it), cross the catwalks, or fight over the bridge of platforms across the middle. Bots play back, mid, front, snake and tower roles; every player is drawn in full at any distance.</p>
     <table>
       <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move</td></tr>
       <tr><td>Mouse</td><td>Look and aim</td></tr>
@@ -454,6 +454,6 @@ window.splatVersion.check();
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
 <!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
-<script type="module" src="src/main.js?v=20261112181908"></script>
+<script type="module" src="src/main.js?v=20261112183815"></script>
 </body>
 </html>

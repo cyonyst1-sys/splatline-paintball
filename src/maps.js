@@ -336,8 +336,8 @@ function inflatable(palette, neon) {
 }
 const CLASSIC = {
   block: [0xf3f3f3, 0xff3b30], wall: [0xf3f3f3, 0xff3b30], longwall: [0x00c2a8, 0x0d3b66], tall: [0x00c2a8, 0x0d3b66],
-  temple: [0x00c2a8, 0x0d3b66], container: [0xffcc00, 0x1b1b1b], snake: [0xffcc00, 0x1b1b1b], can: [0x1fb5ff, 0xffffff],
-  bigcan: [0x7b2ff7, 0xffcc00], minican: [0x1fb5ff, 0xffffff], cake: [0xff2d6f, 0xffffff], tri: [0xff7a00, 0xffffff],
+  temple: [0x00c2a8, 0x0d3b66], container: [0xffcc00, 0x1b1b1b], snake: [0xffcc00, 0x1b1b1b], can: [0x283593, 0xffffff],
+  bigcan: [0x7b2ff7, 0xffcc00], minican: [0x283593, 0xffffff], cake: [0x7b2ff7, 0xffffff], tri: [0xff7a00, 0xffffff],
 };
 const teamPal = (a, b) => ({ block: [a, b], wall: [a, b], longwall: [a, b], tall: [a, b], temple: [a, b], container: [a, b], snake: [a, b], can: [a, b], bigcan: [a, b], minican: [a, b], cake: [a, b], tri: [a, b] });
 const NEON = {

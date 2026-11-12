@@ -73,7 +73,7 @@ Pick a mode on the home screen (the host picks it in multiplayer).
 | Elimination | 4 v 4 | the 10 small maps | One hit and you're out. First team to win 3 rounds. |
 | Capture the Flag | 6 v 6 | the 3 large maps | Infinite respawns (6 s, with spawn protection). Grab the enemy flag and bring it to your own flag stand while your flag is home. A carrier who's tagged drops it; touch your own dropped flag to send it home (it also returns by itself after 20 s). First to 3 captures, or the most after 6 minutes. |
 | King of the Castle | 6 v 6 | the 3 large maps | Attackers respawn forever (7 s wait); defenders start inside the castle with 4 lives each (3 s wait). Attackers win by holding the throne room on the keep's ground floor for 55 s (faster with up to 3 attackers inside, paused while a defender is in the room, and wound back quickly by defenders standing in it), or by using up every defender life. Defenders win if the 4-minute clock runs out. Two rounds with teams swapping; a 1–1 tie goes to the faster capture. |
-| Battle | 20 v 20 | Frontline Valley | One life each, no respawns: the last team with anyone still standing wins. Bots break out into back, mid, front, snake and tower roles (tower players climb the treehouses and hold a window or parapet) and switch plans as the numbers change. Players more than 30 m away are drawn as simple figures to keep it smooth. |
+| Battle | 20 v 20 | Frontline Valley | One life each, no respawns: the last team with anyone still standing wins. Bots break out into back, mid, front, snake and tower roles (tower players climb the treehouses and hold a window or parapet) and switch plans as the numbers change. Every player is drawn as the full model at any distance. |
 
 ### The castle
 
@@ -134,7 +134,7 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 
 Bots fight from cover: they sprint from bunker to bunker toward the enemy (or the objective), picking bunkers that hide them from the nearest threat and that teammates aren't already using. At each bunker they duck, then peek out to shoot (leaning round tall bunkers, standing up over low ones), and move up again after a few seconds, sooner if nobody is in sight. If they're flanked, they relocate.
 
-In Elimination each bot has a role. Off the break, each one runs to its first bunker for that role; after that they play slowly, holding each bunker for several seconds and only moving up a set number of bunkers until the round drags on (40 s) or their team goes up by 2 and pushes.
+In Elimination each bot has a role. Off the break, each one runs to its first bunker for that role; after that they play slowly and from cover: they only move to a bunker that hides them from the nearest opponent (avoiding long runs across an opponent's view), hold each bunker for several seconds and only moving up a set number of bunkers until the round drags on (40 s) or their team goes up by 2 and pushes.
 
 | Role | What it does |
 | --- | --- |
@@ -145,6 +145,8 @@ In Elimination each bot has a role. Off the break, each one runs to its first bu
 | Anchor | Defensive: falls back toward its own base and holds deep cover |
 
 Roles are reassigned whenever someone is tagged, based on the numbers: even teams play back/snake/mid/front; a team down a player plays back and mids; up by 2 or more it pushes with front players; down by 2 or more (or alone against several) it anchors and makes the other team come to it. After 40 s nobody turtles, and after 60 s everyone pushes.
+
+Team colours are neon (electric light blue and hot pink) with a soft glow, on the jersey, sleeves and pants, so players stand out from the field, the trees and the bunkers at any distance. Far from the camera a player keeps the full model; only the marker is merged into one piece and tiny details (pods, straps) are skipped.
 
 Players are jointed procedural models (hips, knees, ankles, spine, head, and arms posed with two-bone IK onto the marker's grips) with a walk/run cycle, a real crouch, dive, lean, breathing and a hands-up pose when tagged. All models are generated in code; nothing is downloaded.
 
