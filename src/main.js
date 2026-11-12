@@ -350,7 +350,7 @@ function freshLife(p) {
   p.alive = true; p.crouch = false; p.ammo = p.mag; p.reload = 0; p.cd = 0;
   p.vx = p.vz = p.mvx = p.mvz = 0; p.tx = undefined;
   p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z; p.path = null; p.flankDone = false; p.cv = null; p.cvLean = 0;
-  p.crawl = false; p.erole = null; p.sn = null; p.snakeDone = false; p.lastSeen = null;
+  p.crawl = false; p.erole = null; p.sn = null; p.snakeDone = false; p.lastSeen = null; p.brokeOut = false; p.adv = 0; p.laneP = null;
   p.lane = [-1, -0.45, 0, 0.45, 1][(Math.random() * 5) | 0];
   p.hold = Math.random() < 0.5; p.avoid = Math.random() < 0.5 ? 1 : -1;
   reviveModel(p);
@@ -662,10 +662,13 @@ function coverAdvance(b, dt, D, target, foes, o) {
   const threat = b.tgt || nearestFoe(b, foes);
   cv.quiet = b.tgt ? 0 : (cv.quiet || 0) + dt;
   // nobody in sight for a while: don't sit around, keep moving up
-  // (patient players, like a back player or an anchor, sit tight anyway)
-  cv.t -= cv.mode === 'cover' && cv.quiet > 1.5 && !o.patient ? dt * (gameMode === 'koth' ? 20 : 3) : dt;
+  // (only in the respawn modes; in Elimination everyone plays it patiently)
+  cv.t -= cv.mode === 'cover' && cv.quiet > 1.5 && !o.patient && respawnMode() ? dt * (gameMode === 'koth' ? 20 : 3) : dt;
   if (cv.mode === 'pick') {
-    cv.spot = o.fixed ? { x: o.fixed.x, z: o.fixed.z } : pickCover(b, target, threat, o, false) || (o.push ? null : pickCover(b, target, threat, o, true));
+    // the break: off the start, run straight to this role's first bunker
+    const brk = o.breakout && !b.brokeOut && roundTime < 4 ? pickBreakout(b, o) : null;
+    if (o.breakout) b.brokeOut = true;
+    cv.spot = brk || (o.fixed ? { x: o.fixed.x, z: o.fixed.z } : pickCover(b, target, threat, o, false) || (o.push ? null : pickCover(b, target, threat, o, true)));
     cv.open = false; cv.willDive = Math.random() < (o.dive || 0);
     if (!cv.spot && !o.push) { cv.spot = { x: b.x, z: b.z }; cv.open = true; } // nowhere better: stay and fight from here
     cv.mode = 'move'; cv.t = 7; b.stuckT = 0; b.lx = b.x; b.lz = b.z;
@@ -674,7 +677,7 @@ function coverAdvance(b, dt, D, target, foes, o) {
     const goal = cv.spot || target, d = Math.hypot(goal.x - b.x, goal.z - b.z);
     if (d < (cv.spot ? 0.45 : 1.5)) {
       if (!cv.spot) { cv.mode = 'pick'; return; }
-      cv.mode = 'cover'; cv.t = rand(o.hold[0], o.hold[1]); cv.peek = false; cv.peekT = rand(0.2, 0.6); cv.check = 0; cv.lowOk = cv.highOk = true;
+      cv.mode = 'cover'; cv.t = holdTime(o); cv.peek = false; cv.peekT = rand(0.2, 0.6); cv.check = 0; cv.lowOk = cv.highOk = true;
     } else {
       // the last couple of metres into a bunker: dive in (front players mostly)
       if (cv.willDive && cv.spot && d < 3.2 && d > 1.8 && (b.y || 0) < 0.3 && b.diveCd <= 0 && b.reload <= 0) {
@@ -682,7 +685,7 @@ function coverAdvance(b, dt, D, target, foes, o) {
       }
       // sprint between bunkers; shoot on the run if someone's in view
       const a = followPath(b, goal, D.speed * (b.tgt ? 0.95 : 1.1) * (o.fast || 1), dt);
-      if (!b.tgt) b.ang += angDiff(d < 2.5 && threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : a, b.ang) * Math.min(1, dt * 6);
+      if (!b.tgt && o.lanes !== 'run') b.ang += angDiff(d < 2.5 && threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : a, b.ang) * Math.min(1, dt * 6);
       b.stuckT += dt;
       if (b.stuckT > 0.9) {
         if (Math.hypot(b.x - b.lx, b.z - b.lz) < 0.4) { b.avoid = -b.avoid; b.path = null; if (!o.fixed) cv.mode = 'pick'; }
@@ -720,9 +723,9 @@ function coverAdvance(b, dt, D, target, foes, o) {
     if (cv.peek) {
       // stay out while trading paint, but not forever
       if (b.tgt && b.ammo > 0 && cv.peekLen < 2.6) { cv.peekT = 0.3; cv.peekLen += 0.3; }
-      else { cv.peek = false; cv.peekT = rand(0.6, 1.5); }
+      else { cv.peek = false; cv.peekT = o.duck ? rand(o.duck[0], o.duck[1]) : rand(0.6, 1.5); }
     } else {
-      cv.peek = true; cv.peekT = cv.peekLen = rand(0.8, 1.6);
+      cv.peek = true; cv.peekT = cv.peekLen = o.peek ? rand(o.peek[0], o.peek[1]) : rand(0.8, 1.6);
       cv.supp = Math.random() < (o.suppress || 0); // lay down paint on their last spot even if they're hiding
       cv.low = false;
       if (!cv.highOk) cv.side = 0; // low bunker: pop up over the top
@@ -738,8 +741,37 @@ function coverAdvance(b, dt, D, target, foes, o) {
   }
   b.cvLean = cv.peek ? cv.side : 0;
   b.cvCrouch = cv.peek ? cv.low : !cv.highOk;
-  // time to move up (only once ducked back in)
-  if (cv.t <= 0 && !cv.peek && !o.fixed) cv.mode = 'pick';
+  // time to move up (only once ducked back in), if this role still has moves left; otherwise keep holding
+  if (cv.t <= 0 && !cv.peek && !o.fixed) {
+    if ((b.adv || 0) < advanceBudget(b, o)) { b.adv = (b.adv || 0) + 1; cv.mode = 'pick'; }
+    else cv.t = holdTime(o);
+  }
+}
+const lateRound = () => gameMode === 'elim' && roundTime > HUNT_AFTER;
+// how long to sit in a bunker; the round dragging on makes everyone quicker
+const holdTime = (o) => rand(o.hold[0], o.hold[1]) * (lateRound() ? 0.5 : 1);
+// how many bunkers a role moves up after the break, before the round drags on or the team goes on the push
+function advanceBudget(b, o) {
+  if (o.budget == null || lateRound() || teamPlan[b.team] === 'push') return Infinity;
+  return o.budget + (o.budgetLate && roundTime > 25 ? o.budgetLate : 0);
+}
+// a role's first bunker off the break: a band of the field measured from your own start line
+// (u = metres from the centre line toward your base), hidden from the other team's start line
+function pickBreakout(b, o) {
+  const [uMin, uMax, zMax, zCentre] = o.breakout, side = b.team ? 1 : -1;
+  const taken = players.filter((q) => q !== b && q.team === b.team && q.alive && q.cv && q.cv.spot).map((q) => q.cv.spot);
+  const ex = -side * (FIELD.hw - 2.5);
+  let best = null, bs = -1e9;
+  for (const c of world.cover) {
+    const u = c.x * side;
+    if (u < uMin || u > uMax || Math.abs(c.z) > zMax) continue;
+    if (taken.some((g) => Math.hypot(g.x - c.x, g.z - c.z) < 2.2)) continue;
+    let s = Math.random() * 3 - Math.abs(c.z) * zCentre - Math.hypot(c.x - b.x, c.z - b.z) * 0.12;
+    if (o.zFollow) s -= Math.abs(c.z - b.z * 2.5) * 0.25;     // mids spread out to their own side of the field
+    if (losClear(ex, 1.6, 0, c.x, 1.0, c.z)) s -= 10;        // must hide you from their break
+    if (s > bs) { bs = s; best = c; }
+  }
+  return best;
 }
 // ---- Elimination roles ----
 // back:   stays deep, creeps forward slowly, holds long and lays ropes of paint on the enemy's bunkers
@@ -747,10 +779,15 @@ function coverAdvance(b, dt, D, target, foes, o) {
 // front:  pushes up fast with long bounds, dives into bunkers, gets close
 // snake:  runs to the snake, dives in, crawls up it and shoots from the end
 // anchor: (defending when down on numbers) falls back to deep cover and makes them come to you
+// breakout: [u from, u to, max |z|, preference for the middle]; budget: bunkers to move up after the break
+// lanes: shoots lanes of paint down the field ('run' = even while running to the first bunker)
 const ROLE = {
-  back:   { hold: [3.5, 6], step: 7, keepAway: 20, suppress: 0.9, rope: 0.5, dive: 0, fast: 0.8, patient: true },
-  mid:    { hold: [2, 4], step: 10, keepAway: 12, suppress: 0.45, rope: 0.75, dive: 0.3 },
-  front:  { hold: [0.8, 2], step: 14, keepAway: 3, push: true, suppress: 0.2, rope: 1, dive: 0.75, fast: 1.12 },
+  back:   { hold: [7, 12], step: 6, keepAway: 20, suppress: 1, rope: 0.5, dive: 0, fast: 0.85, patient: true,
+            budget: 0, budgetLate: 1, breakout: [14, 22, 10, 0.15], peek: [2.5, 4.5], duck: [0.4, 0.9], lanes: 'run', mag: 40 },
+  mid:    { hold: [4.5, 8], step: 8, keepAway: 11, suppress: 0.5, rope: 0.75, dive: 0.35, patient: true,
+            budget: 2, breakout: [7, 14, 13, 0], zFollow: true, lanes: true },
+  front:  { hold: [3, 6], step: 9, keepAway: 3, push: true, suppress: 0.2, rope: 1, dive: 0.85, fast: 1.15, patient: true,
+            budget: 1, breakout: [0.8, 6.5, 9, 0.4] },
   anchor: { hold: [6, 10], step: 7, keepAway: 22, suppress: 0.6, rope: 0.7, dive: 0.15, retreat: true, patient: true },
   snake:  { suppress: 0.3, rope: 0.9 },
 };
@@ -809,7 +846,11 @@ function assignRoles(team) {
   for (const b of pending) {
     let r = roles.shift() || 'mid';
     if (r === 'snake' && b.snakeDone) r = 'front';
-    if (b.erole !== r) { b.erole = r; b.cv = null; b.sn = null; b.crawl = false; }
+    if (b.erole !== r) {
+      b.erole = r; b.cv = null; b.sn = null; b.crawl = false;
+      b.mag = (ROLE[r] && ROLE[r].mag) || BOT.mag;          // back players carry extra pods
+      b.ammo = roundTime < 1 ? b.mag : Math.min(b.ammo, b.mag);
+    }
   }
   teamPlan[team] = plan;
 }
@@ -997,7 +1038,11 @@ function updateBot(b, dt) {
     }
   } else {
     b.seen = 0; b.pitch *= 0.9;
-    if (R && b.cv && b.cv.peek && b.cv.supp) suppress(b, D, R, me, dt);
+    // no one in view: suppress where someone just ducked, or lay lanes down the field
+    if (R && b.cv && b.reload <= 0) {
+      const out = b.cv.peek || (R.lanes === 'run' && b.cv.mode === 'move');
+      if (out && !(b.cv.supp && suppress(b, D, R, me, dt)) && R.lanes && (b.cv.peek || R.lanes === 'run')) laneFire(b, D, R, me, dt);
+    }
   }
 
   botMove(b, dt, D, obj, foes, want);
@@ -1009,16 +1054,42 @@ function updateBot(b, dt) {
 // edge of the bunker they ducked behind, so anyone who pokes out runs into it.
 function suppress(b, D, R, me, dt) {
   const L = b.lastSeen;
-  if (!L || clock - L.t > 5 || b.reload > 0 || b.ammo <= 3) return;
-  const dx = L.x - b.x, dz = L.z - b.z, d = Math.hypot(dx, dz);
-  if (d < 4 || d > D.sight) return;
-  const sweep = Math.sin(clock * 2.6 + b.i * 1.7) * 0.8;
-  const px = L.x - (dz / d) * sweep, pz = L.z + (dx / d) * sweep;
+  if (!L || clock - L.t > 5) return false;
+  const d = Math.hypot(L.x - b.x, L.z - b.z);
+  if (d < 4 || d > D.sight) return false;
+  aimFireAt(b, D, R, me, dt, L.x, L.y, L.z, 0.8);
+  return true;
+}
+// Lanes: nobody in view, so paint the open ground in front of bunkers on their half (the paths they'll run
+// down), a few seconds per lane, sweeping across it. This is what the back player does all game.
+function laneFire(b, D, R, me, dt) {
+  const side = b.team ? 1 : -1;
+  if (!b.laneP || clock > b.laneT) {
+    let best = null;
+    for (let k = 0; k < 10 && !best && world.cover.length; k++) {
+      const c = world.cover[(Math.random() * world.cover.length) | 0];
+      const u = -c.x * side;                                // metres into their half
+      if (u < 0.5 || u > 21) continue;
+      const d = Math.hypot(c.x - b.x, c.z - b.z);
+      if (d > D.sight || d < 8) continue;
+      const px = c.x + (b.x - c.x) / d * 1.3, pz = c.z + (b.z - c.z) / d * 1.3; // just in front of that bunker
+      if (losClear(b.x + me.x, eyeY(b), b.z + me.z, px, 1.0, pz)) best = { x: px, z: pz };
+    }
+    b.laneP = best; b.laneT = clock + rand(1.5, 3.2);
+  }
+  if (b.laneP) aimFireAt(b, D, R, me, dt, b.laneP.x, 1.0, b.laneP.z, 1.6);
+}
+// turn toward a point (sweeping across it by up to `sweep` metres) and fire at the role's rope rate
+function aimFireAt(b, D, R, me, dt, x, y, z, sweep) {
+  if (b.reload > 0 || b.ammo <= 0) return;
+  const dx = x - b.x, dz = z - b.z, d = Math.hypot(dx, dz);
+  const s = Math.sin(clock * 2.6 + b.i * 1.7) * sweep;
+  const px = x - (dz / d) * s, pz = z + (dx / d) * s;
   const want = Math.atan2(pz - b.z, px - b.x), da = angDiff(want, b.ang);
   b.ang += da * Math.min(1, dt * 9);
   if (b.cd > 0 || Math.abs(da) > 0.25) return;
   const muzzleY = eyeY(b) - 0.25, ft = d / b.ballSpeed;
-  const pitch = Math.atan2(L.y + 0.5 * GRAV * ft * ft - muzzleY, d) + gauss() * D.err * 0.6;
+  const pitch = Math.atan2(y + 0.5 * GRAV * ft * ft - muzzleY, d) + gauss() * D.err * 0.6;
   const yaw = b.ang + gauss() * D.err;
   const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
   const pos = new THREE.Vector3(b.x + me.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + me.z + Math.sin(b.ang) * 0.55);

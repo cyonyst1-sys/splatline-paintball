@@ -122,13 +122,13 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 
 Bots fight from cover: they sprint from bunker to bunker toward the enemy (or the objective), picking bunkers that hide them from the nearest threat and that teammates aren't already using. At each bunker they duck, then peek out to shoot (leaning round tall bunkers, standing up over low ones), and move up again after a few seconds, sooner if nobody is in sight. If they're flanked, they relocate.
 
-In Elimination each bot has a role:
+In Elimination each bot has a role. Off the break, each one runs to its first bunker for that role; after that they play slowly, holding each bunker for several seconds and only moving up a set number of bunkers until the round drags on (40 s) or their team goes up by 2 and pushes.
 
 | Role | What it does |
 | --- | --- |
-| Back | Stays deep, creeps forward slowly, holds each bunker for a long time and ropes paint at the bunkers enemies were last seen behind |
-| Mid | Plays the middle of the field with medium bounds and some suppressing fire |
-| Front | Pushes up fast with long bounds and dives into bunkers |
+| Back | Breaks to a deep bunker near its base and shoots lanes of paint down the field from the start whistle (even while running), carrying a bigger hopper. Holds there; moves up one bunker after ~25 s |
+| Mid | Breaks to a bunker in the middle of its half (spreading to its own side), then moves up at most two more bunkers, slowly, laying lanes when it peeks |
+| Front | Sprints down the middle to a bunker near the 50 and dives in, then moves up at most one more bunker |
 | Snake | Runs to the snake on its half, dives in behind it, crawls up it, then shoots from the far end (lying flat, rising to a crouch). Leaves if it's flanked; stays in the snake through role changes while its team has 2+ players |
 | Anchor | Defensive: falls back toward its own base and holds deep cover |
 
