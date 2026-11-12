@@ -1812,6 +1812,7 @@ function updateCoins() { for (const el of document.querySelectorAll('.coin-count
 // ---------- menus ----------
 const SCREENS = ['home', 'shop', 'settings', 'help', 'pause', 'results', 'mp', 'lobby'];
 function showScreen(id) {
+  if (id) releaseLock(); // every menu gets the mouse cursor back
   for (const s of SCREENS) $(s).classList.toggle('hidden', s !== id);
   document.body.classList.toggle('menu', !!id);
   if (id === 'home') renderHome();
@@ -2137,12 +2138,17 @@ $('btnReset').addEventListener('click', () => {
 });
 
 // ---------- pointer lock & input ----------
+// Pointer lock captures the mouse so you can turn forever and the cursor can't leave the window mid-fight.
+// If the browser refuses (e.g. asked again too soon after Esc), we never fall back to a loose cursor: the
+// "Click to aim & shoot" prompt stays up and the next click tries again.
 function lock() {
-  if (fallbackLook) return;
+  if (fallbackLook || document.pointerLockElement === canvas) return; // fallbackLook: automated tests only
+  const plain = () => { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* retry on next click */ } };
   try {
-    const r = canvas.requestPointerLock();
-    if (r && r.catch) r.catch(() => { fallbackLook = true; });
-  } catch (e) { fallbackLook = true; }
+    // raw mouse input (no OS acceleration) where supported
+    const r = canvas.requestPointerLock({ unadjustedMovement: true });
+    if (r && r.catch) r.catch((err) => { if (err && err.name === 'NotSupportedError') plain(); });
+  } catch (e) { plain(); }
 }
 function releaseLock() { if (document.pointerLockElement) document.exitPointerLock(); }
 function pause() {
@@ -2163,12 +2169,14 @@ document.addEventListener('pointerlockchange', () => {
   if (locked) fallbackLook = false;
   if (!locked && inGame()) pause();
 });
-document.addEventListener('pointerlockerror', () => { fallbackLook = true; });
+document.addEventListener('pointerlockerror', () => { locked = false; }); // prompt stays up; next click retries
 addEventListener('mousemove', (e) => {
   if (!(locked || fallbackLook) || !inGame()) return;
   const h = human(); if (!h || !h.alive) return;
+  // some browsers report a huge bogus jump now and then (especially right after locking): ignore those
+  if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
   const k = 0.0022 * save.settings.sens;
-  h.ang += e.movementX * k;
+  h.ang = (h.ang + e.movementX * k) % (Math.PI * 2);   // turn as far as you like, any direction
   h.pitch = clamp(h.pitch - e.movementY * k, -1.25, 1.25);
 });
 canvas.addEventListener('mousedown', (e) => {
