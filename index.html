@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Splatline Paintball</title>
-<meta name="build" content="20261111201804">
+<meta name="build" content="20261111203023">
 <script>
 // Stale-page guard. GitHub Pages lets browsers keep this page for up to 10 minutes, and an old copy of the
 // page mixed with newer game files breaks aiming and shooting. version.json is always fetched fresh; if it
@@ -162,6 +162,13 @@ window.splatVersion.check();
   #reloadBar i { display:block; height:100%; width:calc(var(--p) * 100%); background:var(--accent); }
   #stance { font-size:11px; letter-spacing:.14em; color:var(--muted); min-height:1em; margin-top:4px; }
   #status { position:absolute; bottom:160px; left:0; right:0; text-align:center; font-size:20px; text-shadow:0 2px 6px rgba(0,0,0,.8); }
+  /* free-cursor aiming (when the embedding website blocks mouse capture) */
+  #freeNote { display:none; position:absolute; left:50%; top:62px; transform:translateX(-50%); pointer-events:auto; background:var(--glass);
+    border:1px solid var(--line); border-radius:10px; padding:6px 8px 6px 12px; font-size:12px; color:#d7dfd9; font-weight:600; align-items:center; gap:10px; white-space:nowrap; }
+  #freeNote button { padding:6px 10px; border-radius:8px; border:0; background:var(--accent); color:#191919; font-weight:800; font-size:12px; }
+  body.freeaim #freeNote { display:flex; }
+  body.freeaim canvas { cursor:crosshair; }
+  @media (max-width:700px) { #freeNote { white-space:normal; width:calc(100% - 32px); } }
   #hint { position:absolute; left:16px; bottom:22px; background:var(--glass); border-radius:10px; padding:10px 14px; font-size:13px; color:#d7dfd9; font-weight:600; }
   #pops { position:absolute; left:50%; top:58%; transform:translateX(-50%); }
   .pop { font-size:24px; color:var(--gold); text-shadow:0 2px 6px rgba(0,0,0,.7); animation:pop 1.4s ease-out forwards; white-space:nowrap; text-align:center; }
@@ -239,13 +246,13 @@ window.splatVersion.check();
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "./src/main.js": "./src/main.js?v=20261111201804",
-  "./src/world.js": "./src/world.js?v=20261111201804",
-  "./src/maps.js": "./src/maps.js?v=20261111201804",
-  "./src/marker.js": "./src/marker.js?v=20261111201804",
-  "./src/economy.js": "./src/economy.js?v=20261111201804",
-  "./src/audio.js": "./src/audio.js?v=20261111201804",
-  "./src/net.js": "./src/net.js?v=20261111201804"
+  "./src/main.js": "./src/main.js?v=20261111203023",
+  "./src/world.js": "./src/world.js?v=20261111203023",
+  "./src/maps.js": "./src/maps.js?v=20261111203023",
+  "./src/marker.js": "./src/marker.js?v=20261111203023",
+  "./src/economy.js": "./src/economy.js?v=20261111203023",
+  "./src/audio.js": "./src/audio.js?v=20261111203023",
+  "./src/net.js": "./src/net.js?v=20261111203023"
 } }
 </script>
 </head>
@@ -264,6 +271,7 @@ window.splatVersion.check();
   <div id="banner" class="hidden"></div>
   <div id="status" class="hidden"></div>
   <div id="clickPlay" class="hidden">Click to aim &amp; shoot</div>
+  <div id="freeNote">Mouse capture is blocked on this website: push the cursor to the edge to keep turning. <button id="btnFullHud">⤢ Open full window</button></div>
   <div id="hint">Click (left or right) = one shot · WASD move · Q/E lean · Space dive · C crouch · Shift sprint · R reload · Esc pause</div>
   <div id="ammoBox"><div><span id="ammoNum">20</span><span id="ammoMag">/ 20</span></div><div id="reloadBar" class="hidden"><i></i></div><div id="stance"></div></div>
   <div id="pops"></div>
@@ -295,6 +303,7 @@ window.splatVersion.check();
     <button class="btn" id="btnShop">🛒 Pro shop</button>
     <button class="btn" id="btnSettings">⚙️ Settings</button>
     <button class="btn" id="btnHelp">❓ How to play</button>
+    <button class="btn hidden" id="btnFull">⤢ Open full window (best mouse controls)</button>
     <div id="stats"></div>
   </div>
 </div>
@@ -442,6 +451,6 @@ window.splatVersion.check();
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
 <!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
-<script type="module" src="src/main.js?v=20261111201804"></script>
+<script type="module" src="src/main.js?v=20261111203023"></script>
 </body>
 </html>

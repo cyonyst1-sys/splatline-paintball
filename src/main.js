@@ -549,6 +549,7 @@ const reward = (n) => Math.round(n * DIFF[matchDiff].reward);
 // ---------- human ----------
 const DIVE_T = 0.95;
 function updateHuman(p, dt) {
+  if (p.alive) edgeTurn(p, dt);
   const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
   const s = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
   p.bodyAng = p.ang;
@@ -2318,17 +2319,44 @@ $('btnReset').addEventListener('click', () => {
 
 // ---------- pointer lock & input ----------
 // Pointer lock captures the mouse so you can turn forever and the cursor can't leave the window mid-fight.
-// If the browser refuses (e.g. asked again too soon after Esc), we never fall back to a loose cursor: the
-// "Click to aim & shoot" prompt stays up and the next click tries again.
+// If the browser refuses (e.g. asked again too soon after Esc), the "Click to aim & shoot" prompt stays up
+// and the next click tries again.
+// The exception: inside a frame on another website that doesn't allow pointer lock (Google Sites embeds,
+// for one, can't). Then capture will never work, so aim with the free cursor instead: push it to the left or
+// right edge to keep turning, and offer to open the game in its own tab for the best controls.
+const framed = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+let lockBlocked = false, mouseX = -1, mouseIn = false;
+function lockFailed() {
+  if (!framed || lockBlocked) return;
+  lockBlocked = true; fallbackLook = true;
+  document.body.classList.add('freeaim');
+  toast('This website blocks mouse capture. Aim with the cursor: push it to the left or right edge to keep turning. Open full window for the best controls.');
+}
 function lock() {
-  if (fallbackLook || document.pointerLockElement === canvas) return; // fallbackLook: automated tests only
-  const plain = () => { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* retry on next click */ } };
+  if (fallbackLook || document.pointerLockElement === canvas) return; // fallbackLook: free-cursor aiming (or tests)
+  const plain = () => { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(lockFailed); } catch (e) { lockFailed(); } };
   try {
     // raw mouse input (no OS acceleration) where supported
     const r = canvas.requestPointerLock({ unadjustedMovement: true });
-    if (r && r.catch) r.catch((err) => { if (err && err.name === 'NotSupportedError') plain(); });
+    if (r && r.catch) r.catch((err) => { if (err && err.name === 'NotSupportedError') plain(); else lockFailed(); });
   } catch (e) { plain(); }
 }
+// free-cursor aiming: holding the cursor at the left/right edge keeps turning you (so a full 360 still works)
+function edgeTurn(h, dt) {
+  if (!lockBlocked || !mouseIn || mouseX < 0) return;
+  const ex = mouseX / innerWidth, edge = 0.09;
+  const k = ex < edge ? -(1 - ex / edge) : ex > 1 - edge ? (ex - (1 - edge)) / edge : 0;
+  if (k) h.ang = (h.ang + k * 3.4 * save.settings.sens * dt) % (Math.PI * 2);
+}
+function openFullWindow() {
+  const q = new URLSearchParams(location.search); q.delete('fresh');
+  if (net.mode && lobby.code) q.set('room', lobby.code);
+  const s = q.toString();
+  window.open(location.origin + location.pathname + (s ? '?' + s : ''), '_blank', 'noopener');
+}
+$('btnFull').classList.toggle('hidden', !framed);   // only offered when the game is inside another website
+$('btnFull').addEventListener('click', () => { initAudio(); sfx.click(); openFullWindow(); });
+$('btnFullHud').addEventListener('click', (e) => { e.stopPropagation(); openFullWindow(); });
 function releaseLock() { if (document.pointerLockElement) document.exitPointerLock(); }
 function pause() {
   if (!inGame() || localPaused) return;
@@ -2348,8 +2376,10 @@ document.addEventListener('pointerlockchange', () => {
   if (locked) fallbackLook = false;
   if (!locked && inGame()) pause();
 });
-document.addEventListener('pointerlockerror', () => { locked = false; }); // prompt stays up; next click retries
+document.addEventListener('pointerlockerror', () => { locked = false; lockFailed(); }); // top-level: retry next click
+document.addEventListener('mouseout', (e) => { if (!e.relatedTarget) mouseIn = false; });
 addEventListener('mousemove', (e) => {
+  mouseX = e.clientX; mouseIn = true;
   if (!(locked || fallbackLook) || !inGame()) return;
   const h = human(); if (!h || !h.alive) return;
   // some browsers report a huge bogus jump now and then (especially right after locking): ignore those
