@@ -60,9 +60,13 @@ function segBox(ax, az, bx, bz, hw, hd) {
   return t0;
 }
 // for bots and nav: shapes that are in the way of someone standing at height y (ramps always count)
+// quick reject: a circle around each shape (cached on the shape)
+const brOf = (s) => s.br ?? (s.br = s.t === 'c' ? s.r : Math.hypot(s.hw, s.hd));
 function inWay(s, y, h) { return s.t === 'r' ? s.y0 < y + h && s.y0 > y - 1 : s.y0 < y + h && s.y1 > y + KNEE; }
 export function segBlocked2D(ax, az, bx, bz, pad, y = 0, h = 1.8) {
   for (const s of shapes) {
+    const rr = brOf(s) + pad;
+    if (Math.min(ax, bx) > s.x + rr || Math.max(ax, bx) < s.x - rr || Math.min(az, bz) > s.z + rr || Math.max(az, bz) < s.z - rr) continue;
     if (!inWay(s, y, h)) continue;
     if (s.t === 'c') { if (segCircle(ax, az, bx, bz, s.x, s.z, s.r + pad) >= 0) return true; }
     else {
@@ -74,6 +78,8 @@ export function segBlocked2D(ax, az, bx, bz, pad, y = 0, h = 1.8) {
 }
 export function insideAny(x, z, pad, y = 0, h = 1.8) {
   for (const s of shapes) {
+    const rr = brOf(s) + pad;
+    if (Math.abs(x - s.x) > rr || Math.abs(z - s.z) > rr) continue;
     if (!inWay(s, y, h)) continue;
     if (s.t === 'c') { if (Math.hypot(x - s.x, z - s.z) < s.r + pad) return true; }
     else { const [lx, lz] = toLocal(s, x, z); if (Math.abs(lx) < s.hw + pad && Math.abs(lz) < s.hd + pad) return true; }
@@ -84,6 +90,8 @@ export function insideAny(x, z, pad, y = 0, h = 1.8) {
 export function resolveCircle(p, R) {
   const y = p.y || 0, h = p.h || 1.8;
   for (const s of shapes) {
+    const rr = brOf(s) + R;
+    if (Math.abs(p.x - s.x) > rr || Math.abs(p.z - s.z) > rr) continue;
     if (s.y0 >= y + h) continue;
     if (s.t === 'c') {
       if (!(s.y1 > y + KNEE)) continue;
@@ -121,7 +129,7 @@ export function supportHeight(x, z, y) {
 // ---------- ground-level pathfinding for bots (A* on a grid) ----------
 let nav = null;
 function buildNav() {
-  const cs = 0.7, W = Math.ceil((BOUND.hw * 2) / cs), H = Math.ceil((BOUND.hd * 2) / cs);
+  const cs = Math.max(0.7, (BOUND.hw * 2) / 200), W = Math.ceil((BOUND.hw * 2) / cs), H = Math.ceil((BOUND.hd * 2) / cs);
   const grid = new Uint8Array(W * H);
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const x = -BOUND.hw + (i + 0.5) * cs, z = -BOUND.hd + (j + 0.5) * cs;

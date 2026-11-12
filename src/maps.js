@@ -875,6 +875,36 @@ MAPS.push(
       ['can', -28, -10], ['can', -28, 10], ['tri', -24, 0], ['minican', -32, -17], ['minican', -32, 17]],
     kothBase: [['cake', -38, -7], ['cake', -38, 7], ['tall', -32, -14], ['tall', -32, 14], ['wall', -28, 0, PI / 2], ['can', -24, -8], ['can', -24, 8]] },
 );
+// ---------- the battlefield (200 x 120 m, four times a large map) for 32 v 32 Battle ----------
+// Generated from a fixed seed, so every browser in a multiplayer room builds exactly the same field.
+const BATTLE = { hw: 100, hd: 60 };
+function battleLayout(seed) {
+  let s = seed >>> 0;
+  const r = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const kinds = [['can', 4], ['tall', 3], ['wall', 4], ['block', 3], ['tri', 3], ['minican', 3], ['temple', 3], ['bigcan', 1], ['longwall', 2], ['cake', 1], ['container', 1]];
+  const total = kinds.reduce((a, k) => a + k[1], 0);
+  const kind = () => { let x = r() * total; for (const [k, w] of kinds) if ((x -= w) < 0) return k; return 'can'; };
+  const out = [];
+  // snakes: two down each sideline per half, and one each side of the middle lane
+  for (const x of [-74, -40]) { out.push(['snake', x, 56]); out.push(['snake', x, -56]); }
+  out.push(['snake', -22, 21]); out.push(['snake', -22, -21]);
+  const nearSnake = (x, z) => Math.abs(Math.abs(z) - 21) < 3 && Math.abs(x + 22) < 8;
+  // a jittered grid of bunkers over the half, leaving the back 12 m clear for the start line
+  const cell = 8.5;
+  for (let x = -86; x <= -6; x += cell) for (let z = -48; z <= 48.1; z += cell) {
+    if (r() < 0.36) continue;
+    const jx = x + (r() - 0.5) * 3, jz = z + (r() - 0.5) * 3;
+    if (nearSnake(jx, jz)) continue;
+    out.push([kind(), +jx.toFixed(1), +jz.toFixed(1), +(r() * PI).toFixed(2)]);
+  }
+  // the centre line
+  for (const z of [-45, -30, -15, 0, 15, 30, 45]) out.push([z === 0 ? 'cake' : Math.abs(z) === 30 ? 'bigcan' : 'tall', 0, z, z ? 0.78 : 0]);
+  return out;
+}
+MAPS.push({ id: 'frontline', name: 'Frontline Valley', style: 'wood', theme: T.woods, battle: true, size: BATTLE,
+  desc: 'A huge woodsball valley of plank walls, logs and stumps for 32 v 32.', layout: battleLayout(20261111) });
+
 export const mapById = (id) => MAPS.find((m) => m.id === id) || MAPS[0];
-/** Maps that can host a game mode: the 10 small fields for Elimination, the 3 large ones for CTF and King of the Castle. */
-export const mapsFor = (mode) => MAPS.filter((m) => (mode === 'elim' ? !m.large : m.large));
+/** Maps that can host a game mode: the 10 small fields for Elimination, the 3 large ones for CTF and King of the
+ *  Castle, and the battlefield for Battle. */
+export const mapsFor = (mode) => MAPS.filter((m) => (mode === 'battle' ? m.battle : mode === 'elim' ? !m.large && !m.battle : m.large));

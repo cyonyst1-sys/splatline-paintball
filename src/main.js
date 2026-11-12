@@ -44,6 +44,7 @@ export const MODES = {
   elim: { name: 'Elimination', desc: "One hit and you're out. First team to win 3 rounds.", teamSize: 4 },
   ctf: { name: 'Capture the Flag', desc: 'Infinite respawns. Bring their flag to yours. First to 3 captures, or most in 6 min.', teamSize: 6 },
   koth: { name: 'King of the Castle', desc: 'Attackers respawn forever. Defenders get 4 lives each. Hold the throne room to win.', teamSize: 6 },
+  battle: { name: 'Battle', desc: '32 v 32 on a huge field. One life each: the last team with anyone standing wins.', teamSize: 32 },
 };
 const CTF = { caps: 3, time: 360, returnT: 20, pickR: 1.4, capR: 2.6 };
 // attackRespawn: attackers wait longer than defenders, which gives the castle time to regroup
@@ -291,7 +292,11 @@ const ray = new THREE.Raycaster();
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 const human = () => players.find((p) => p.human);
 const inGame = () => state === 'countdown' || state === 'playing' || state === 'roundEnd';
-const respawnMode = () => gameMode !== 'elim';
+// Elimination and Battle: one life, last team standing. The others respawn.
+const elimLike = () => gameMode === 'elim' || gameMode === 'battle';
+const respawnMode = () => !elimLike();
+// bot names: the six per team, then numbered call signs for big teams (Ace, Jet, … Ace-2, Jet-2, …)
+const botName = (team, i) => { const n = TEAMS[team].names; return i < n.length ? n[i] : `${n[i % n.length]}-${((i / n.length) | 0) + 1}`; };
 const attackers = () => (round % 2 === 1 ? 0 : 1); // King of the Castle: blue attacks in round 1, red in round 2
 
 // ---------- maps & modes ----------
@@ -317,7 +322,7 @@ function makePlayers(n) {
   for (let team = 0; team < 2; team++) for (let i = 0; i < n; i++) {
     const look = botLook(team, i), model = makeModel(team, look); scene.add(model.root);
     players.push({
-      team, i, human: false, ctrl: 'bot', peer: null, name: TEAMS[team].names[i], model, look,
+      team, i, human: false, ctrl: 'bot', peer: null, name: botName(team, i), model, look,
       x: 0, z: 0, y: 0, vy: 0, ang: 0, bodyAng: 0, pitch: 0, h: H_STAND, crouch: false, alive: true,
       diveT: 0, diveCd: 0, diveDir: 0, queued: 0, crouchOn: false, cWas: false, spaceWas: false, lean: 0,
       ammo: 20, mag: 20, reload: 0, reloadT: 1.6, cd: 0, cool: 0.3, spread: 1, ballSpeed: 46, kills: 0,
@@ -378,7 +383,7 @@ const slotIdx = (p) => players.indexOf(p);
 function assignSlots(assign) {
   for (const p of players) {
     p.human = false; p.ctrl = net.mode === 'client' ? 'net' : 'bot'; p.peer = null;
-    p.name = TEAMS[p.team].names[p.i]; setNameTag(p, null); p.look = botLook(p.team, p.i);
+    p.name = botName(p.team, p.i); setNameTag(p, null); p.look = botLook(p.team, p.i);
   }
   const me = net.mode ? net.myId : 'local';
   for (const a of assign) {
@@ -754,7 +759,7 @@ function coverAdvance(b, dt, D, target, foes, o) {
     else cv.t = holdTime(o);
   }
 }
-const lateRound = () => gameMode === 'elim' && roundTime > HUNT_AFTER;
+const lateRound = () => elimLike() && roundTime > HUNT_AFTER * (gameMode === 'battle' ? 3 : 1);
 // how long to sit in a bunker; the round dragging on makes everyone quicker
 const holdTime = (o) => rand(o.hold[0], o.hold[1]) * (lateRound() ? 0.5 : 1);
 // how many bunkers a role moves up after the break, before the round drags on or the team goes on the push
@@ -765,7 +770,9 @@ function advanceBudget(b, o) {
 // a role's first bunker off the break: a band of the field measured from your own start line
 // (u = metres from the centre line toward your base), hidden from the other team's start line
 function pickBreakout(b, o) {
-  const [uMin, uMax, zMax, zCentre] = o.breakout, side = b.team ? 1 : -1;
+  // the bands are tuned for the 50 x 30 m fields; stretch them to bigger fields
+  const kx = FIELD.hw / 25, kz = FIELD.hd / 15;
+  const [uMin, uMax, zMax, zCentre] = [o.breakout[0] * kx, o.breakout[1] * kx, o.breakout[2] * kz, o.breakout[3] / kz], side = b.team ? 1 : -1;
   const taken = players.filter((q) => q !== b && q.team === b.team && q.alive && q.cv && q.cv.spot).map((q) => q.cv.spot);
   const ex = -side * (FIELD.hw - 2.5);
   let best = null, bs = -1e9;
@@ -801,45 +808,65 @@ const ROLE = {
 const ROLE_RANK = { front: 0, snake: 1, mid: 2, anchor: 3, back: 4 }; // most advanced bot gets the most forward role
 const teamPlan = ['even', 'even'];
 let roleT = 0;
-// the snake on a team's own half (closest to its base), if this field has one
-function ownSnake(team) {
+// snakes on a team's own half
+const ownSnakes = (team) => (world.info.snakes || []).filter((s) => s.x * (team ? 1 : -1) >= -4);
+// the snake a snake player should take: closest to base, and not one a teammate is already playing
+function ownSnake(team, b) {
   const side = team ? 1 : -1;
+  const used = players.filter((q) => q !== b && q.team === team && q.alive && q.sn && q.sn.snake).map((q) => q.sn.snake);
   let best = null, bd = 1e9;
-  for (const s of world.info.snakes || []) {
-    if (s.x * side < -4) continue;
-    const d = Math.abs(s.x - side * FIELD.hw) + Math.random() * 0.5;
+  for (const s of ownSnakes(team)) {
+    const d = Math.abs(s.x - side * FIELD.hw) + Math.random() * 0.5 + (used.includes(s) ? 1000 : 0);
     if (d < bd) { bd = d; best = s; }
   }
   return best;
+}
+// Battle's field is four times as big: the same roles move up further before the round is "late"
+const BATTLE_BUDGET = { back: 3, mid: 8, front: 6 };
+function roleParams(role) {
+  const R = ROLE[role];
+  if (gameMode !== 'battle' || !R.breakout) return R;
+  return R.battle || (R.battle = { ...R, step: R.step * 1.6, budget: BATTLE_BUDGET[role], budgetLate: 0 });
 }
 // What a team does depends on the numbers: up by 2+ → push, down by 2+ (or alone against several) → defend.
 function assignRoles(team) {
   const mine = players.filter((p) => p.team === team && p.alive), n = mine.length;
   const m = players.filter((p) => p.team !== team && p.alive).length;
   if (!n) return;
-  const late = roundTime > HUNT_AFTER + 20;       // a long stalemate: everybody goes
+  const huntAt = HUNT_AFTER * (gameMode === 'battle' ? 3 : 1);
+  const late = roundTime > huntAt + (gameMode === 'battle' ? 60 : 20);       // a long stalemate: everybody goes
   let plan = n - m >= 2 ? 'push' : m - n >= 2 || (n === 1 && m >= 2) ? 'defend' : m > n ? 'behind' : 'even';
   if (late) plan = 'push';
-  else if (plan === 'defend' && roundTime > HUNT_AFTER) plan = 'behind'; // can't turtle forever
+  else if (plan === 'defend' && roundTime > huntAt) plan = 'behind'; // can't turtle forever
   const sets = {
     even:   [['mid'], ['mid', 'front'], ['back', 'mid', 'front'], ['back', 'snake', 'mid', 'front']],
     behind: [['mid'], ['back', 'mid'], ['back', 'mid', 'mid'], ['back', 'snake', 'mid', 'mid']],
     push:   [['front'], ['mid', 'front'], ['mid', 'front', 'front'], ['back', 'snake', 'front', 'front']],
     defend: [['anchor'], ['back', 'anchor'], ['back', 'anchor', 'anchor'], ['back', 'anchor', 'anchor', 'mid']],
   };
-  let roles = sets[plan][Math.min(n, 4) - 1].slice();
-  while (roles.length < n) roles.push(plan === 'push' ? 'front' : 'mid');
+  const snakesHere = ownSnakes(team).length;
+  let roles;
+  if (n <= 4) roles = sets[plan][n - 1].slice();
+  else {
+    // big teams (Battle): the same idea as a percentage mix, plus a snake player for each of your snakes (up to 3)
+    const mix = { even: { back: 0.25, front: 0.25 }, behind: { back: 0.3, front: 0.1 }, push: { back: 0.15, front: 0.5 }, defend: { back: 0.3, anchor: 0.6 } }[plan];
+    roles = [];
+    for (const [r, f] of Object.entries(mix)) for (let k = 0; k < Math.round(n * f); k++) roles.push(r);
+    if (plan !== 'defend') for (let k = 0; k < Math.min(3, snakesHere); k++) roles.push('snake');
+    roles = roles.slice(0, n);
+    while (roles.length < n) roles.push('mid');
+  }
   if (late) roles = roles.map((r) => (r === 'back' ? 'mid' : r === 'snake' ? 'snake' : 'front'));
   // a human on the team takes one of the slots (a mid if there is one)
   if (mine.some((p) => !(p.ctrl === 'bot'))) { const k = roles.indexOf('mid'); roles.splice(k >= 0 ? k : roles.length - 1, 1); }
   const bots = mine.filter((p) => p.ctrl === 'bot');
-  const hasSnake = !!ownSnake(team);
-  roles = roles.map((r) => (r === 'snake' && !hasSnake ? 'front' : r));
-  // someone already down in the snake stays there (it's a commitment), as long as the team isn't turtling
-  const inSnake = bots.find((b) => b.erole === 'snake' && b.sn && b.sn.st !== 'go');
-  if (inSnake && !roles.includes('snake') && n >= 2 && plan !== 'defend' && roles.length) {
+  if (!snakesHere) roles = roles.map((r) => (r === 'snake' ? 'front' : r));
+  // anyone already down in a snake stays there (it's a commitment), as long as the team isn't turtling
+  const inSnake = bots.filter((b) => b.erole === 'snake' && b.sn && b.sn.st !== 'go');
+  let snakeSlots = roles.filter((r) => r === 'snake').length;
+  for (let q = snakeSlots; q < inSnake.length && n >= 2 && plan !== 'defend' && roles.length; q++) {
     const k = ['front', 'mid', 'anchor'].map((r) => roles.indexOf(r)).find((i) => i >= 0);
-    roles[k ?? roles.length - 1] = 'snake';
+    roles[k ?? roles.length - 1] = 'snake'; snakeSlots++;
   }
   // keep roles that still exist (no pointless reshuffles), then hand out the rest by how far up each bot is
   const pending = [];
@@ -866,7 +893,7 @@ function botDive(b, dir) { b.diveT = DIVE_T; b.diveDir = dir; b.crawl = false; b
 function snakeRole(b, dt, D, foes) {
   let sn = b.sn;
   if (!sn) {
-    const s = ownSnake(b.team);
+    const s = ownSnake(b.team, b);
     if (!s) { b.erole = 'front'; return; }
     const u = { x: Math.cos(s.rot), z: -Math.sin(s.rot) }, n = { x: Math.sin(s.rot), z: Math.cos(s.rot) };
     const sd = Math.sign(n.z * s.z + n.x * 0.001) || 1;       // the outside of the snake, away from the middle
@@ -875,7 +902,7 @@ function snakeRole(b, dt, D, foes) {
     ends.sort((a, c) => c.x * side - a.x * side);            // [entry (own end), far end]
     const [entry, far] = ends, L = Math.hypot(entry.x - far.x, entry.z - far.z);
     const back = { x: (entry.x - far.x) / L, z: (entry.z - far.z) / L };
-    sn = b.sn = { entry, far, back, approach: { x: entry.x + back.x * 3, z: entry.z + back.z * 3 }, st: 'go', t: 14 };
+    sn = b.sn = { snake: s, entry, far, back, approach: { x: entry.x + back.x * 3, z: entry.z + back.z * 3 }, st: 'go', t: 14 };
     b.cv = { mode: 'move', peek: false };
   }
   sn.t -= dt;
@@ -986,7 +1013,7 @@ function updateBot(b, dt) {
   const D = DIFF[matchDiff];
   const foes = players.filter((p) => p.alive && p.team !== b.team && p.protect <= 0);
   const obj = respawnMode() ? objectiveFor(b) : null;
-  const R = gameMode === 'elim' ? ROLE[b.erole || 'mid'] : null;
+  const R = elimLike() ? ROLE[b.erole || 'mid'] : null;
   // mid-dive: the slide carries them; nothing else until they land
   b.diveCd -= dt;
   if (b.diveT > 0) {
@@ -1121,7 +1148,7 @@ function botMove(b, dt, D, obj, foes, want) {
   const role = b.erole || 'mid';
   if (role === 'snake') return snakeRole(b, dt, D, foes);
   b.crawl = false;
-  const R = ROLE[role];
+  const R = roleParams(role);
   // anchors fall back toward their own base; everyone else works toward the nearest opponent
   const target = R.retreat ? { x: (b.team ? 1 : -1) * (FIELD.hw - 5), z: b.z * 0.6 } : nearestFoe(b, foes);
   coverAdvance(b, dt, D, target, foes, R);
@@ -1344,7 +1371,7 @@ function endRoundCheck() {
   if (left[0] && left[1]) return;
   endRound(left[0] ? 0 : 1, true);
 }
-const matchOver = () => (gameMode === 'elim' ? score[0] >= WIN_ROUNDS || score[1] >= WIN_ROUNDS : gameMode === 'ctf' ? true : round >= KOTH.rounds);
+const matchOver = () => (gameMode === 'battle' ? true : gameMode === 'elim' ? score[0] >= WIN_ROUNDS || score[1] >= WIN_ROUNDS : gameMode === 'ctf' ? true : round >= KOTH.rounds);
 function matchWinner() {
   if (score[0] !== score[1]) return score[0] > score[1] ? 0 : 1;
   if (gameMode === 'koth' && koth.capTime[0] != null && koth.capTime[1] != null) return koth.capTime[0] <= koth.capTime[1] ? 0 : 1;
@@ -1516,7 +1543,7 @@ function hostPeerLeft(id) {
   lobby.players = lobby.players.filter((l) => l.id !== id);
   const p = players.find((q) => q.peer === id);
   if (p) {
-    p.ctrl = 'bot'; p.peer = null; p.name = TEAMS[p.team].names[p.i]; setNameTag(p, null); p.look = botLook(p.team, p.i); setLook(p, p.look);
+    p.ctrl = 'bot'; p.peer = null; p.name = botName(p.team, p.i); setNameTag(p, null); p.look = botLook(p.team, p.i); setLook(p, p.look);
     p.mag = BOT.mag; p.reloadT = BOT.reload; p.ballSpeed = BOT.ball; p.goal = null; p.tgt = null; p.path = null;
     broadcast({ t: 'ctrl', slot: slotIdx(p), name: p.name });
     feed.unshift({ a: '', at: p.team, b: `${p.name} (bot) joins`, bt: p.team, t: 4, note: true }); renderFeed();
@@ -1678,7 +1705,7 @@ function update(dt) {
   if (state === 'playing') {
     roundTime += dt;
     // Elimination bots re-think their roles twice a second (and right away when someone is tagged)
-    if (gameMode === 'elim' && !client) { roleT -= dt; if (roleT <= 0) { roleT = 0.5; assignRoles(0); assignRoles(1); } }
+    if (elimLike() && !client) { roleT -= dt; if (roleT <= 0) { roleT = 0.5; assignRoles(0); assignRoles(1); } }
     for (const p of players) {
       p.protect = Math.max(0, p.protect - dt);
       if (!p.alive) {
@@ -1716,10 +1743,10 @@ function update(dt) {
   if (client) smoothNetPlayers(dt);
   if (state === 'playing' || state === 'roundEnd') updateBalls(dt);
   if (state === 'playing' && !client) {
-    if (gameMode === 'elim') endRoundCheck();
+    if (elimLike()) endRoundCheck();
     else if (gameMode === 'ctf' && flagsSt) ctfUpdate(dt);
     else if (gameMode === 'koth' && world.info.castle) kothUpdate(dt);
-  } else if (state === 'playing' && client && gameMode !== 'elim') timeLeft -= dt;
+  } else if (state === 'playing' && client && respawnMode()) timeLeft -= dt;
   for (const p of players) {
     if (p.ctrl === 'remote' || p.ctrl === 'net') continue;
     const target = p.diveT > 0 || p.crawl ? H_PRONE : p.crouch ? H_CROUCH : H_STAND;
@@ -1732,18 +1759,45 @@ function update(dt) {
   world.update(dt, clock);
 }
 const ease = (cur, tgt, k) => cur + (tgt - cur) * k;
+// Level of detail for big games: players further than LOD_D from the camera are drawn as simple team-coloured
+// figures (two instanced meshes per team, a handful of draw calls in all) instead of full jointed models.
+const LOD_D = 30, IMP = { body: new THREE.CapsuleGeometry(0.21, 1.0, 3, 8).translate(0, 0.86, 0),
+  head: new THREE.SphereGeometry(0.135, 10, 8).translate(0, 1.6, 0), meshes: null };
+const impDummy = new THREE.Object3D();
+function impostors() {
+  if (IMP.meshes) return IMP.meshes;
+  return (IMP.meshes = TEAMS.map((t, k) => {
+    const body = new THREE.InstancedMesh(IMP.body, sleeveMat[k], 64), head = new THREE.InstancedMesh(IMP.head, M.glove, 64);
+    for (const im of [body, head]) { im.count = 0; im.frustumCulled = false; scene.add(im); }
+    return { body, head };
+  }));
+}
 function syncModels(dt) {
   const k = Math.min(1, dt * 12);
+  const lod = players.length > 16, imp = lod || IMP.meshes ? impostors() : null, n = [0, 0];
+  const cx = camera.position.x, cz = camera.position.z;
   for (const p of players) {
     const m = p.model;
     let vis = !(p.human && p.alive && inGameOrPaused());
     if (p.alive && p.protect > 0 && ((clock * 8) | 0) % 2) vis = false; // blink while spawn-protected
     if (!p.alive && respawnMode() && inGame()) vis = false;          // the tagged walk off: hide them until they respawn
+    // far away in a big game: an instanced stand-in, and the full model leaves the scene entirely
+    const far = lod && vis && (p.x - cx) ** 2 + (p.z - cz) ** 2 > LOD_D * LOD_D;
+    if (far !== !!m.far) { m.far = far; if (far) scene.remove(m.root); else scene.add(m.root); }
+    if (far) {
+      if (p.alive) {
+        impDummy.position.set(p.x, p.y || 0, p.z); impDummy.rotation.set(0, -p.bodyAng, 0); impDummy.scale.set(1, p.h / H_STAND, 1);
+        impDummy.updateMatrix();
+        imp[p.team].body.setMatrixAt(n[p.team], impDummy.matrix); imp[p.team].head.setMatrixAt(n[p.team], impDummy.matrix); n[p.team]++;
+      }
+      continue;
+    }
     m.root.visible = vis;
     animateMarker(m.gun, dt);
     if (!vis) continue;
     poseModel(m, p, dt, k);
   }
+  if (imp) for (let t = 0; t < 2; t++) for (const im of [imp[t].body, imp[t].head]) { im.count = n[t]; im.instanceMatrix.needsUpdate = true; }
   if (vmMarker) animateMarker(vmMarker, dt);
 }
 // the whole-body pose: legs from movement, crouch and dive from height, spine from aim and lean, arms by IK
@@ -1861,9 +1915,12 @@ function renderHud() {
   if (!inGameOrPaused()) return;
   const h = human(); if (!h) return;
   $('s0').textContent = score[0]; $('s1').textContent = score[1];
-  $('roundLbl').textContent = gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? `CTF · ${mmss(timeLeft)}` : `ROUND ${round}/2 · ${mmss(timeLeft)}`;
+  $('roundLbl').textContent = gameMode === 'battle' ? 'BATTLE' : gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? `CTF · ${mmss(timeLeft)}` : `ROUND ${round}/2 · ${mmss(timeLeft)}`;
   for (let t = 0; t < 2; t++) {
-    $('pips' + t).innerHTML = players.filter((p) => p.team === t).map((p) => `<i class="${p.alive ? 'on' : ''}"></i>`).join('');
+    const mine = players.filter((p) => p.team === t);
+    // big teams: a count instead of a dot per player
+    $('pips' + t).innerHTML = mine.length > 8 ? `<b class="pipcount">${mine.filter((p) => p.alive).length}<small>/${mine.length}</small></b>`
+      : mine.map((p) => `<i class="${p.alive ? 'on' : ''}"></i>`).join('');
   }
   // objective panel + markers
   let obj = '';
@@ -1909,9 +1966,9 @@ function renderHud() {
   $('clickPlay').classList.toggle('hidden', !(inGame() && !locked && !fallbackLook && !localPaused));
   let banner = '';
   if (state === 'countdown') {
-    const title = gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? 'CAPTURE THE FLAG'
+    const title = gameMode === 'battle' ? 'BATTLE · 32 v 32' : gameMode === 'elim' ? `ROUND ${round}` : gameMode === 'ctf' ? 'CAPTURE THE FLAG'
       : `ROUND ${round} · <span style="color:${TEAMS[attackers()].css}">${TEAMS[attackers()].name} ATTACKS</span>`;
-    const sub = gameMode === 'koth' ? `<em>${h.team === attackers() ? 'Take the throne room in the keep' : `Defend the castle · ${KOTH.lives} lives`}</em>` : '';
+    const sub = gameMode === 'battle' ? '<em>One life each. Last team standing wins.</em>' : gameMode === 'koth' ? `<em>${h.team === attackers() ? 'Take the throne room in the keep' : `Defend the castle · ${KOTH.lives} lives`}</em>` : '';
     banner = `${title}${sub}<small>${Math.ceil(timer)}</small>`;
   } else if (state === 'roundEnd') {
     banner = lastWinner < 0 ? 'DRAW' : `<span style="color:${TEAMS[lastWinner].css}">${TEAMS[lastWinner].name} ${gameMode === 'ctf' ? 'WINS!' : 'WINS THE ROUND'}</span>`;

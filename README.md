@@ -73,6 +73,7 @@ Pick a mode on the home screen (the host picks it in multiplayer).
 | Elimination | 4 v 4 | the 10 small maps | One hit and you're out. First team to win 3 rounds. |
 | Capture the Flag | 6 v 6 | the 3 large maps | Infinite respawns (6 s, with spawn protection). Grab the enemy flag and bring it to your own flag stand while your flag is home. A carrier who's tagged drops it; touch your own dropped flag to send it home (it also returns by itself after 20 s). First to 3 captures, or the most after 6 minutes. |
 | King of the Castle | 6 v 6 | the 3 large maps | Attackers respawn forever (7 s wait); defenders start inside the castle with 4 lives each (3 s wait). Attackers win by holding the throne room on the keep's ground floor for 55 s (faster with up to 3 attackers inside, paused while a defender is in the room, and wound back quickly by defenders standing in it), or by using up every defender life. Defenders win if the 4-minute clock runs out. Two rounds with teams swapping; a 1–1 tie goes to the faster capture. |
+| Battle | 32 v 32 | Frontline Valley | One life each, no respawns: the last team with anyone still standing wins. Bots break out into back, mid, front and snake roles (scaled up for 32-player teams) and switch plans as the numbers change. Players more than 30 m away are drawn as simple figures to keep it smooth. |
 
 ### The castle
 
@@ -109,6 +110,12 @@ Large maps (100 × 60 m) for Capture the Flag and King of the Castle:
 | --- | --- | --- |
 | Highland Keep | Woodsball (plank walls, logs, stumps) | Grey stone |
 | Sandstone Citadel | Desert ruins (adobe, columns, boulders) | Sandstone |
+
+The battlefield (200 × 120 m, four times a large map) for Battle:
+
+| Map | Bunker style | Notes |
+| --- | --- | --- |
+| Frontline Valley | Woodsball (plank walls, logs, stumps, cable spools) | About 330 bunkers on a generated, mirrored layout (the same in every browser), with log snakes down both sidelines and either side of the middle 
 | Frostgate | Snow walls, ice blocks, snowmen | Snow |
 
 Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleachers and scenery that matches the map. Paint splats stick to bunkers, the ground and tagged players.
