@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Splatline Paintball</title>
-<meta name="build" content="20261112192756">
+<meta name="build" content="20261112193315">
 <script>
 // Stale-page guard. GitHub Pages lets browsers keep this page for up to 10 minutes, and an old copy of the
 // page mixed with newer game files breaks aiming and shooting. version.json is always fetched fresh; if it
@@ -248,13 +248,13 @@ window.splatVersion.check();
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "./src/main.js": "./src/main.js?v=20261112192756",
-  "./src/world.js": "./src/world.js?v=20261112192756",
-  "./src/maps.js": "./src/maps.js?v=20261112192756",
-  "./src/marker.js": "./src/marker.js?v=20261112192756",
-  "./src/economy.js": "./src/economy.js?v=20261112192756",
-  "./src/audio.js": "./src/audio.js?v=20261112192756",
-  "./src/net.js": "./src/net.js?v=20261112192756"
+  "./src/main.js": "./src/main.js?v=20261112193315",
+  "./src/world.js": "./src/world.js?v=20261112193315",
+  "./src/maps.js": "./src/maps.js?v=20261112193315",
+  "./src/marker.js": "./src/marker.js?v=20261112193315",
+  "./src/economy.js": "./src/economy.js?v=20261112193315",
+  "./src/audio.js": "./src/audio.js?v=20261112193315",
+  "./src/net.js": "./src/net.js?v=20261112193315"
 } }
 </script>
 </head>
@@ -274,7 +274,7 @@ window.splatVersion.check();
   <div id="status" class="hidden"></div>
   <div id="clickPlay" class="hidden">Click to aim &amp; shoot</div>
   <div id="freeNote">Mouse capture is blocked on this website: push the cursor to the edge to keep turning. <button id="btnFullHud">⤢ Open full window</button></div>
-  <div id="hint">Click (left or right) = one shot · WASD move · Q/E lean · Space dive · Ctrl crouch · Shift sprint · R reload · Esc pause</div>
+  <div id="hint">Click (left or right) = one shot · WASD move · Q/E lean · Space dive · Alt crouch · Shift sprint · R reload · Esc pause</div>
   <div id="ammoBox"><div><span id="ammoNum">20</span><span id="ammoMag">/ 20</span></div><div id="reloadBar" class="hidden"><i></i></div><div id="stance"></div></div>
   <div id="pops"></div>
 </div>
@@ -392,7 +392,7 @@ window.splatVersion.check();
     <h2>Settings</h2>
     <div class="field"><label for="sens">Mouse sensitivity</label><input type="range" id="sens" min="0.3" max="2.5" step="0.05"></div>
     <div class="field"><label for="volume">Volume</label><input type="range" id="volume" min="0" max="1" step="0.05"></div>
-    <div class="field"><label>Crouch (Ctrl)</label>
+    <div class="field"><label>Crouch (Alt)</label>
       <div class="seg" id="crouchMode"><button data-c="hold">Hold</button><button data-c="toggle">Toggle</button></div></div>
     <div class="field"><label>Graphics</label>
       <div class="seg" id="quality"><button data-q="high">High</button><button data-q="low">Low (faster)</button></div>
@@ -416,7 +416,7 @@ window.splatVersion.check();
       <tr><td><kbd>Q</kbd> / <kbd>E</kbd> (hold)</td><td>Lean left / right to peek and shoot around cover</td></tr>
       <tr><td><kbd>Space</kbd></td><td>Dive forward (or the way you're moving) and slide low</td></tr>
       <tr><td><kbd>Shift</kbd></td><td>Sprint (worse accuracy)</td></tr>
-      <tr><td><kbd>Ctrl</kbd></td><td>Crouch behind low bunkers, steadier aim (hold or toggle in Settings)</td></tr>
+      <tr><td><kbd>Alt</kbd></td><td>Crouch behind low bunkers, steadier aim (hold or toggle in Settings)</td></tr>
       <tr><td><kbd>R</kbd></td><td>Reload</td></tr>
       <tr><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pause</td></tr>
     </table>
@@ -454,6 +454,6 @@ window.splatVersion.check();
 <div id="loading">Loading the field…</div>
 <noscript><p style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center">Splatline needs JavaScript and WebGL.</p></noscript>
 <!-- every ?v= number is bumped on each update so browsers never mix old and new game files -->
-<script type="module" src="src/main.js?v=20261112192756"></script>
+<script type="module" src="src/main.js?v=20261112193315"></script>
 </body>
 </html>

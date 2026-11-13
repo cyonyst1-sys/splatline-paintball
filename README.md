@@ -16,7 +16,7 @@ You play on Blue with three bot teammates against four Yellow bots on an outdoor
 | Q / E (hold) | Lean left / right around cover (only your upper body is exposed) |
 | Space | Dive and slide low |
 | Shift | Sprint (less accurate) |
-| Ctrl | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings). During a match, Ctrl+W (crouch while moving forward) asks before leaving instead of closing the tab |
+| Alt (Option on a Mac) | Crouch: hide behind low bunkers, steadier aim (hold or toggle in Settings) |
 | R | Reload |
 | Esc / P | Pause |
 
