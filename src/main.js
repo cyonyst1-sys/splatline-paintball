@@ -562,7 +562,7 @@ function updateHuman(p, dt) {
   const f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
   const s = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
   p.bodyAng = p.ang;
-  const cKey = !!keys.KeyC;
+  const cKey = !!(keys.ControlLeft || keys.ControlRight); // crouch: Ctrl
   if (save.settings.crouchToggle) { if (cKey && !p.cWas) p.crouchOn = !p.crouchOn; p.crouch = p.crouchOn; }
   else p.crouch = cKey;
   p.cWas = cKey;
@@ -2602,6 +2602,9 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
   if (inGame() && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+  // Ctrl is crouch: stop the browser's Ctrl shortcuts (save, bookmark, find...) while playing (Ctrl+W can't be
+  // blocked by a page; the beforeunload guard at the end of this file catches it)
+  if (inGame() && (e.ctrlKey || e.code === 'ControlLeft' || e.code === 'ControlRight')) e.preventDefault();
   if (e.code === 'KeyP' || (e.code === 'Escape' && !locked)) {
     if (state === 'paused' || localPaused) resume();
     else if (inGame()) { releaseLock(); pause(); }
@@ -2662,3 +2665,5 @@ if (location.search.includes('debug')) {
     previewYaw(y) { if (preview) preview.yaw = y; },
   };
 }
+// Ctrl is crouch, so Ctrl+W (crouch + forward) would close the tab: during a match the browser asks first instead
+addEventListener('beforeunload', (e) => { if (inGame()) { e.preventDefault(); e.returnValue = ''; } });
