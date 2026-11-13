@@ -501,6 +501,26 @@ export function createWorld(canvas, high) {
     shapes.push(K.t === 'b' ? { t: 'b', x, z, rot, hw: K.w / 2, hd: K.d / 2, y0: 0, y1: K.h } : { t: 'c', x, z, rot, r: K.r, y0: 0, y1: K.h });
     if (kind === 'snake') info.snakes.push({ x, z, rot, hw: K.w / 2, hd: K.d / 2 }); // the AI's snake players crawl along these
   }
+  // walls, floors and ramps (the castle, and the buildings on the close-quarters maps), centred at x = cx
+  function placeParts(parts, mat, cx = 0) {
+    for (const part of parts) {
+      const x = cx + part.x, z = part.z, rot = part.rot || 0;
+      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot;
+      bunkerMeshes.push(...buildCastlePart(part, mat, g));
+      finishGroup(g);
+      const base = { x, z, rot };
+      if (part.type === 'wall') shapes.push({ ...base, t: 'b', hw: part.w / 2, hd: part.d / 2, y0: part.y0, y1: part.y1 + (part.crenel ? 0.5 : 0) });
+      else if (part.type === 'tower') shapes.push({ ...base, t: 'b', hw: part.w / 2, hd: part.d / 2, y0: 0, y1: part.h + 0.6 });
+      else if (part.type === 'pillar') shapes.push({ ...base, t: 'c', r: part.r, y0: 0, y1: part.h });
+      else if (part.type === 'floor') {
+        shapes.push({ ...base, t: 'b', hw: part.w / 2, hd: part.d / 2, y0: part.top - 0.4, y1: part.top });
+        surfaces.push({ ...base, t: 'f', hw: part.w / 2, hd: part.d / 2, top: part.top });
+      } else if (part.type === 'ramp') {
+        const r = { ...base, t: 'r', hw: part.w / 2, hd: part.d / 2, h0: part.h0, h1: part.h1, y0: part.base };
+        shapes.push(r); surfaces.push(r);
+      }
+    }
+  }
   function placeCastle(castle, cx, style) {
     const plan = castlePlan();
     for (const part of plan.parts) {
@@ -620,7 +640,10 @@ export function createWorld(canvas, high) {
         ? [...Array(8)].map((_, i) => [Math.cos(i * Math.PI / 4) * (s.r + off), Math.sin(i * Math.PI / 4) * (s.r + off)])
         : [[s.hw + off, 0], [-s.hw - off, 0], [0, s.hd + off], [0, -s.hd - off],
           ...(s.hw > 1.2 ? [[s.hw * 0.6, s.hd + off], [-s.hw * 0.6, s.hd + off], [s.hw * 0.6, -s.hd - off], [-s.hw * 0.6, -s.hd - off]] : []),
-          ...(s.hd > 1.2 ? [[s.hw + off, s.hd * 0.6], [s.hw + off, -s.hd * 0.6], [-s.hw - off, s.hd * 0.6], [-s.hw - off, -s.hd * 0.6]] : [])];
+          ...(s.hd > 1.2 ? [[s.hw + off, s.hd * 0.6], [s.hw + off, -s.hd * 0.6], [-s.hw - off, s.hd * 0.6], [-s.hw - off, -s.hd * 0.6]] : []),
+          // long walls (buildings, the castle): a spot every 2 m along both faces
+          ...(s.hw > 3 ? [...Array(Math.floor(s.hw - 1))].flatMap((_, i) => { const a = -s.hw + 1.5 + i * 2; return a < s.hw - 1 ? [[a, s.hd + off], [a, -s.hd - off]] : []; }) : []),
+          ...(s.hd > 3 ? [...Array(Math.floor(s.hd - 1))].flatMap((_, i) => { const a = -s.hd + 1.5 + i * 2; return a < s.hd - 1 ? [[s.hw + off, a], [-s.hw - off, a]] : []; }) : [])];
       for (const [lx, lz] of local) {
         const [x, z] = s.t === 'c' ? [s.x + lx, s.z + lz] : toWorld(s, lx, lz);
         if (Math.abs(x) < BOUND.hw - 0.6 && Math.abs(z) < BOUND.hd - 0.6 && !insideAny(x, z, 0.36) && supportHeight(x, z, 0) === 0) cover.push({ x, z });
@@ -652,6 +675,7 @@ export function createWorld(canvas, high) {
     place(map.layout, true);
     info.posts = [];
     if (map.forest) { placeForest(map.forest.parts); info.posts = map.forest.posts; }
+    if (map.build) placeParts(map.build.parts, map.build.mat);
     info.map = map; info.mode = mode; info.large = !!map.large; info.flags = null; info.castle = null;
     if (mode === 'ctf' && map.ctf) {
       place(map.ctf, true);

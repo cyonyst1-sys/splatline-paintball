@@ -70,7 +70,7 @@ Pick a mode on the home screen (the host picks it in multiplayer).
 
 | Mode | Teams | Fields | Rules |
 | --- | --- | --- | --- |
-| Elimination | 4 v 4 | the 10 small maps | One hit and you're out. First team to win 3 rounds. |
+| Elimination | 4 v 4 | the 13 small maps | One hit and you're out. First team to win 3 rounds. |
 | Capture the Flag | 6 v 6 | the 3 large maps | Infinite respawns (6 s, with spawn protection). One flag starts in the middle of the field. Grab it and carry it to the scoring zone at the far end, where the other team starts (the zone glows in your team colour). A carrier who's tagged drops it; anyone can pick it up, and it goes back to the middle after 15 s. First to 3 scores, or the most after 6 minutes. |
 | King of the Castle | 6 v 6 | the 3 large maps | Attackers respawn forever (7 s wait); defenders start inside the castle with 4 lives each (3 s wait). Attackers win by holding the throne room on the keep's ground floor for 55 s (faster with up to 3 attackers inside, paused while a defender is in the room, and wound back quickly by defenders standing in it), or by using up every defender life. Defenders win if the 4-minute clock runs out. Two rounds with teams swapping; a 1–1 tie goes to the faster capture. |
 | Battle | 20 v 20 | Frontline Valley | One life each, no respawns: the last team with anyone still standing wins. Bots break out into back, mid, front, snake and tower roles (tower players climb the treehouses and hold a window or parapet) and switch plans as the numbers change. Every player is drawn as the full model at any distance. |
@@ -104,6 +104,14 @@ Pick a map with the arrows on the home screen (or **🎲 Random**). In multiplay
 | Frostbite | Snow brick walls, ice blocks, snowmen, an igloo | Snowfield |
 | Scrapyard | Pallet stacks, rusty containers, culvert pipes, junk piles | Dusk |
 
+Close-quarters maps (Elimination): buildings, rooms, hallways and alleys, with walls you can't shoot through, windows you can, and a lot of corners.
+
+| Map | Built from | Layout |
+| --- | --- | --- |
+| Kill House | Plywood walls | A training house: rooms either side of a hallway and a big centre hall, doorways everywhere |
+| Old Town | Brick buildings | Corner buildings by each base, long buildings with alleys between them, and a house on the plaza with a flat roof you can climb onto |
+| The Compound | Concrete walls | A maze of walls inside a compound wall, round a two-room bunker, with shipping containers outside |
+
 Large maps (100 × 60 m) for Capture the Flag and King of the Castle:
 
 | Map | Bunker style | Castle |
@@ -125,7 +133,7 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 
 - `index.html`: page, menus, HUD and styles
 - `src/world.js`: scene, scenery, map loading, paint decals and collision helpers
-- `src/maps.js`: the maps: bunker styles, layouts, themes, the castle, and Frontline Valley's treehouses, catwalks and trees
+- `src/maps.js`: the maps: bunker styles, layouts, themes, the castle, the close-quarters buildings, and Frontline Valley's treehouses, catwalks and trees
 - `src/main.js`: game loop, player and bot logic, shooting, menus
 - `src/economy.js`: coins, upgrades, saved progress
 - `src/audio.js`: procedural sound effects

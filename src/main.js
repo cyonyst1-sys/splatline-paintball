@@ -18,7 +18,7 @@ const stubs = {};
 const $ = (id) => document.getElementById(id)
   || stubs[id] || (console.warn(`index.html has no #${id} (stale page?)`), stubs[id] = document.createElement('div'));
 // multiplayer protocol version: players on different versions can't share a room
-const PROTO = 5;
+const PROTO = 6;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rand = (a, b) => a + Math.random() * (b - a);

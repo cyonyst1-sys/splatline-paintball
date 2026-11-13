@@ -1,4 +1,4 @@
-// Ten maps. Each has its own bunker style, symmetric layout and look (ground, sky, light).
+// The maps. Each has its own bunker style, symmetric layout and look (ground, sky, light).
 // A layout lists generic bunker "kinds" (sizes used for collision); each style decides
 // what that kind looks like: an inflatable can, a tree stump, a snowman, a stack of tires...
 import * as THREE from 'three';
@@ -139,6 +139,25 @@ const TEX = {
     speckle(g, S, 2500, ['rgba(40,40,40,.25)', 'rgba(230,230,220,.2)']);
     blotch(g, S, 10, 'rgba(60,80,40,.18)', 10, 40);
   }),
+  brick: () => ctex('brick', 256, (g, S) => {
+    g.fillStyle = '#b9b2a6'; g.fillRect(0, 0, S, S); // mortar
+    const rows = 8, h = S / rows, w = S / 4;
+    for (let r = 0; r < rows; r++) for (let x = (r % 2 ? -w / 2 : 0); x < S; x += w) {
+      g.fillStyle = `hsl(${rnd(8, 18)}, ${rnd(40, 55)}%, ${rnd(30, 42)}%)`; g.fillRect(x + 2, r * h + 2, w - 4, h - 4);
+    }
+    speckle(g, S, 2000, ['rgba(0,0,0,.18)', 'rgba(255,220,200,.12)']);
+    blotch(g, S, 8, 'rgba(40,30,25,.18)', 15, 50);
+  }),
+  ply: () => ctex('ply', 256, (g, S) => { // plywood sheets, screwed to studs
+    g.fillStyle = '#c9a46c'; g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 70; i++) {
+      g.strokeStyle = `rgba(${rnd(120, 160) | 0},${rnd(80, 110) | 0},40,.25)`; g.lineWidth = rnd(1, 3);
+      const y = Math.random() * S; g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(S * 0.3, y + rnd(-8, 8), S * 0.7, y + rnd(-8, 8), S, y + rnd(-4, 4)); g.stroke();
+    }
+    g.fillStyle = 'rgba(80,55,25,.5)'; g.fillRect(0, 0, S, 3); g.fillRect(0, 0, 3, S);
+    g.fillStyle = '#444';
+    for (const [x, y] of [[12, 12], [S - 12, 12], [12, S - 12], [S - 12, S - 12], [S / 2, 12], [S / 2, S - 12]]) { g.beginPath(); g.arc(x, y, 2, 0, 7); g.fill(); }
+  }),
   crate: () => ctex('crate', 128, (g, S) => {
     g.fillStyle = '#9a6a3a'; g.fillRect(0, 0, S, S);
     g.strokeStyle = 'rgba(50,25,8,.35)'; for (let y = 0; y < S; y += 16) { g.beginPath(); g.moveTo(0, y); g.lineTo(S, y); g.stroke(); }
@@ -184,6 +203,8 @@ const MT = {
   bore: () => std('bore', { color: 0x0b0b0b, roughness: 1 }),
   soil: () => std('soil', { color: 0x3b2a1c, roughness: 1 }),
   leaf: () => std('leaf', { color: 0x3f7a35, roughness: 0.9, flatShading: true }),
+  brick: () => std('brick', { map: TEX.brick(), roughness: 0.92 }, 1.6),
+  ply: () => std('ply', { map: TEX.ply(), roughness: 0.8 }, 2.4),
 };
 
 // ---------- geometry ----------
@@ -714,6 +735,10 @@ const CASTLE_MATS = {
   stone: () => ({ wall: MT.greyStone(), floor: MT.planks(), ramp: MT.planks() }),
   sand: () => ({ wall: MT.stone(), floor: MT.planks(), ramp: MT.planks() }),
   snow: () => ({ wall: MT.snow(), floor: MT.snow(), ramp: MT.planks() }),
+  // close-quarters maps
+  ply: () => ({ wall: MT.ply(), floor: MT.planks(), ramp: MT.planks() }),
+  brick: () => ({ wall: MT.brick(), floor: MT.concrete(), ramp: MT.concrete() }),
+  concrete: () => ({ wall: MT.concrete(), floor: MT.concrete(), ramp: MT.concrete() }),
 };
 function rampGeo(L, D, h0, h1, base) {
   const g = new THREE.BoxGeometry(L, 1, D).toNonIndexed(), p = g.attributes.position;
@@ -844,6 +869,87 @@ export const MAPS = [
       ['cake', -9, 4], ['wall', -8, -6, 0.5], ['minican', -6, -12], ['tall', -5, 0, 0.4], ['bigcan', -19, 11], ['tri', -11, -12.5],
       ['container', 0, -1, PI / 2], ['cake', 0, 9]] },
 ];
+// ---------- close-quarters maps (Elimination): buildings, rooms, hallways and alleys ----------
+// Built from the castle's parts (walls with window bands, floors, ramps) in a city material. Walls are drawn for
+// the blue half (x <= 0) and mirrored onto the red half; a wall centred on x = 0 is built once.
+function buildings(mat, draw) {
+  const P = [];
+  // a straight wall from (x0, z0) to (x1, z1) (along x or along z), with doorways (full-height gaps) centred at
+  // `doors` (positions along the wall) and, with `win`, a row of windows from waist to head height
+  const wall = (x0, z0, x1, z1, o = {}) => {
+    const h = o.h ?? 2.8, y0 = o.y0 ?? 0, t = o.t ?? 0.25, dw = o.dw ?? 1.8, alongX = z0 === z1;
+    const a0 = Math.min(alongX ? x0 : z0, alongX ? x1 : z1), a1 = Math.max(alongX ? x0 : z0, alongX ? x1 : z1);
+    const seg = (p, q) => {
+      if (q - p < 0.3) return;
+      const c = (p + q) / 2;
+      P.push({ type: 'wall', x: alongX ? c : x0, z: alongX ? z0 : c, rot: alongX ? 0 : PI / 2, w: q - p, d: t, y0, y1: y0 + h,
+        bands: o.win && q - p > 3.5 ? [[y0 + 0.95, y0 + 1.85]] : [], crenel: false });
+    };
+    let s = a0;
+    for (const d of [...(o.doors || [])].sort((a, b) => a - b)) { seg(s, d - dw / 2); s = d + dw / 2; }
+    seg(s, a1);
+  };
+  const floor = (x, z, w, d, top) => P.push({ type: 'floor', x, z, rot: 0, w, d, top });
+  const ramp = (x, z, rot, w, d, h0, h1) => P.push({ type: 'ramp', x, z, rot, w, d, h0, h1, base: Math.min(h0, h1) });
+  draw(wall, floor, ramp);
+  const parts = [...P];
+  for (const p of P) if (Math.abs(p.x) > 0.01) parts.push({ ...p, x: -p.x, rot: PI - p.rot });
+  return { mat, parts };
+}
+MAPS.push(
+  { id: 'killhouse', name: 'Kill House', style: 'junk', theme: T.dusk, cqb: true,
+    desc: 'A plywood training house: rooms, hallways and doorways. Clear it room by room.',
+    build: buildings('ply', (wall) => {
+      wall(-14, -11, -14, 11, { doors: [-5, 5], win: true, h: 2.6 });   // outside walls
+      wall(-14, 11, 0, 11, { doors: [-9], win: true, h: 2.6 });
+      wall(-14, -11, 0, -11, { doors: [-4], win: true, h: 2.6 });
+      wall(-8, -11, -8, 11, { doors: [-7.5, 0, 7.5], h: 2.6 });         // inside: three rooms on the west side
+      wall(-14, -3, -8, -3, { doors: [-11], h: 2.6 }); wall(-14, 3, -8, 3, { doors: [-11], h: 2.6 });
+      wall(-8, -4, -3, -4, { doors: [-5.5], h: 2.6 }); wall(-8, 4, -3, 4, { doors: [-5.5], h: 2.6 }); // a hallway and two rooms
+      wall(-3, -11, -3, -4, { doors: [-7.5], win: true, h: 2.6 }); wall(-3, 4, -3, 11, { doors: [7.5], win: true, h: 2.6 });
+      wall(-1.6, 7, 1.6, 7, { h: 2.6 }); wall(-1.6, -7, 1.6, -7, { h: 2.6 }); // the big centre hall
+    }),
+    layout: [['tall', -18, -9], ['tall', -18, 9], ['can', -19, 0], ['block', -16.5, -2.5, 0.3], ['minican', -11, 7], ['minican', -11, -7.5],
+      ['can', -11, 0], ['tall', -5.5, 9], ['block', -5.5, -8.5, PI / 2], ['minican', -5.5, 1.8], ['cake', 0, 0], ['minican', -1.6, 9.2], ['minican', 1.6, -9.2]] },
+  { id: 'oldtown', name: 'Old Town', style: 'urban', theme: T.urban, cqb: true,
+    desc: 'Brick buildings and narrow alleys around a plaza. Climb onto the rooftops.',
+    build: buildings('brick', (wall, floor, ramp) => {
+      // corner buildings by each base
+      wall(-21, 6, -14, 6, { doors: [-17.5], win: true, h: 3.2 }); wall(-14, 6, -14, 14, { doors: [10], win: true, h: 3.2 });
+      wall(-21, 14, -14, 14, { win: true, h: 3.2 }); wall(-21, 6, -21, 14, { win: true, h: 3.2 });
+      wall(-21, -6, -14, -6, { doors: [-17.5], win: true, h: 3.2 }); wall(-14, -14, -14, -6, { doors: [-10], win: true, h: 3.2 });
+      wall(-21, -14, -14, -14, { win: true, h: 3.2 }); wall(-21, -14, -21, -6, { win: true, h: 3.2 });
+      // the house on the plaza, with a flat roof (stairs up the back, a low wall round the edge)
+      wall(-11, -3, -5, -3, { doors: [-8], win: true, h: 3.2 }); wall(-11, 3, -5, 3, { doors: [-8], win: true, h: 3.2 });
+      wall(-5, -3, -5, 3, { win: true, h: 3.2 }); wall(-11, -3, -11, 3, { win: true, h: 3.2 });
+      floor(-8, 0, 6.25, 6.25, 3.2);
+      ramp(-13, -2.2, 0, 4, 1.4, 0, 3.2);
+      wall(-11, -3, -5, -3, { y0: 3.2, h: 1 }); wall(-11, 3, -5, 3, { y0: 3.2, h: 1 }); wall(-5, -3, -5, 3, { y0: 3.2, h: 1 });
+      wall(-11, -3, -11, 3, { y0: 3.2, h: 1, doors: [-2.2], dw: 1.6 });
+      // long buildings on the north and south sides, with an alley between them and the corner buildings
+      wall(-10, 7, -2, 7, { doors: [-6], win: true, h: 3.2 }); wall(-2, 7, -2, 14, { doors: [10.5], win: true, h: 3.2 });
+      wall(-10, 7, -10, 14, { doors: [11], win: true, h: 3.2 }); wall(-10, 14, -2, 14, { win: true, h: 3.2 });
+      wall(-10, -7, -2, -7, { doors: [-6], win: true, h: 3.2 }); wall(-2, -14, -2, -7, { doors: [-10.5], win: true, h: 3.2 });
+      wall(-10, -14, -10, -7, { doors: [-11], win: true, h: 3.2 }); wall(-10, -14, -2, -14, { win: true, h: 3.2 });
+    }),
+    layout: [['temple', -18, 2.5, PI / 2], ['wall', -12.5, 3.2, PI / 2], ['can', -12, 10.5], ['can', -12, -10.5], ['minican', -17.5, 10],
+      ['minican', -17.5, -10], ['block', -6, 11, 0.4], ['block', -6, -11, -0.4], ['wall', -2.5, 4.8], ['wall', -2.5, -4.8], ['cake', 0, 0], ['tall', 0, 10.5], ['tall', 0, -10.5]] },
+  { id: 'compound', name: 'The Compound', style: 'military', theme: T.outpost, cqb: true,
+    desc: 'A maze of concrete walls around a two-room bunker, with shipping containers outside.',
+    build: buildings('concrete', (wall) => {
+      wall(-13, -13, -13, 13, { doors: [-9, 2], win: true, h: 2.6 });   // the compound wall, two gates
+      wall(-10, -15, -10, -6, { h: 2.6 }); wall(-10, -2, -10, 8, { win: true, h: 2.6 });
+      wall(-7, -10, -7, -2, { win: true, h: 2.6 }); wall(-7, 2, -7, 12, { h: 2.6 });
+      wall(-7, -6, -4, -6, { h: 2.6 }); wall(-7, 6, -4, 6, { h: 2.6 });
+      wall(-13, 8, -10, 8, { h: 2.6 }); wall(-13, -2, -10, -2, { h: 2.6 });
+      // the bunker in the middle: one room each side, a doorway between them
+      wall(-4, -4, -4, 4, { doors: [0], win: true, h: 2.6 }); wall(-4, 4, 0, 4, { doors: [-2], h: 2.6 }); wall(-4, -4, 0, -4, { doors: [-2], h: 2.6 });
+      wall(0, -4, 0, 4, { doors: [0], h: 2.6 });
+    }),
+    layout: [['container', -17.5, -9.5, PI / 2, 'urban'], ['container', -17.5, 9.5, PI / 2, 'urban'], ['wall', -17, 0, PI / 2], ['can', -11.5, -10],
+      ['minican', -11.5, 5], ['block', -8.5, -11.5, 0], ['can', -8.5, 3], ['tall', -5.5, 9.5], ['minican', -5.5, -8.5], ['wall', -2, 0, PI / 2],
+      ['tall', 0, 10], ['tall', 0, -10]] },
+);
 // ---------- large maps (100 x 60 m) for Capture the Flag and King of the Castle ----------
 // `layout` is the mirrored mid-field; `ctf` adds cover around both flag bases (mirrored);
 // `kothBase` is cover at the attackers' end; `castle` is the castle material (the castle sits at the red end).
@@ -1088,6 +1194,6 @@ export function buildForestPart(part, group) {
 const TRUNK_GEO = new THREE.CylinderGeometry(0.75, 1, 1, 10);
 
 export const mapById = (id) => MAPS.find((m) => m.id === id) || MAPS[0];
-/** Maps that can host a game mode: the 10 small fields for Elimination, the 3 large ones for CTF and King of the
+/** Maps that can host a game mode: the small fields for Elimination, the 3 large ones for CTF and King of the
  *  Castle, and the battlefield for Battle. */
 export const mapsFor = (mode) => MAPS.filter((m) => (mode === 'battle' ? m.battle : mode === 'elim' ? !m.large && !m.battle : m.large));
