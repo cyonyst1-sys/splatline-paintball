@@ -313,6 +313,21 @@ function ensureMap(id, mode) {
   if (currentMap === id && currentMode === mode) return;
   world.loadMap(id, mode); currentMap = id; currentMode = mode;
   buildObjectives();
+  warmShaders();
+}
+// Prepare the shaders for things that first appear mid-game (paintballs, paint puffs, far-away markers) while the
+// map loads, instead of stalling the frame they first show up in.
+function warmShaders() {
+  const g = new THREE.Group(), box = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+  try { // only a speed-up (and skipped if this runs before the game has finished setting up)
+    g.position.set(0, -60, 0);
+    for (const m of ballMats) g.add(new THREE.Mesh(ballGeo, m));
+    const far = new THREE.Mesh(box, FAR_GUN_MAT); far.castShadow = high; g.add(far);
+    world.puff(new THREE.Vector3(0, -60, 0), 0);
+    scene.add(g);
+    renderer.compile(scene, camera);
+  } catch (e) { /* ignore */ }
+  scene.remove(g); box.dispose();
 }
 function mapInfo(sel, mode) { return validMap(sel, mode) ? mapById(sel) : { name: '🎲 Random map', desc: 'A different field every match.' }; }
 const cycleMap = (sel, d, mode) => { const o = mapOptions(mode), i = Math.max(0, o.indexOf(sel)); return o[(i + d + o.length) % o.length]; };
@@ -367,6 +382,7 @@ function freshLife(p) {
   p.goal = null; p.tgt = null; p.seen = 0; p.scanT = Math.random() * 0.2; p.stuckT = 0; p.lx = p.x; p.lz = p.z; p.path = null; p.flankDone = false; p.cv = null; p.cvLean = 0;
   p.crawl = false; p.erole = null; p.sn = null; p.snakeDone = false; p.tw = null; p.towerDone = false; p.lastSeen = null; p.brokeOut = false; p.adv = 0; p.laneP = null;
   p.lane = [-1, -0.45, 0, 0.45, 1][(Math.random() * 5) | 0];
+  p.startDelay = Math.random() * 0.6;
   p.hold = Math.random() < 0.5; p.avoid = Math.random() < 0.5 ? 1 : -1;
   reviveModel(p);
 }
@@ -791,14 +807,21 @@ function pickBreakout(b, o) {
   const [uMin, uMax, zMax, zCentre] = [o.breakout[0] * kx, o.breakout[1] * kx, o.breakout[2] * kz, o.breakout[3] / kz], side = b.team ? 1 : -1;
   const taken = players.filter((q) => q !== b && q.team === b.team && q.alive && q.cv && q.cv.spot).map((q) => q.cv.spot);
   const ex = -side * (FIELD.hw - 2.5);
-  let best = null, bs = -1e9;
+  // score every spot cheaply, then only check sight lines for the best dozen (on the big Battle field there are
+  // thousands of spots, and a sight check for each one, for 40 players at once, froze the game at the whistle)
+  const cands = [];
   for (const c of world.cover) {
     const u = c.x * side;
     if (u < uMin || u > uMax || Math.abs(c.z) > zMax) continue;
     if (taken.some((g) => Math.hypot(g.x - c.x, g.z - c.z) < 2.2)) continue;
     let s = Math.random() * 3 - Math.abs(c.z) * zCentre - Math.hypot(c.x - b.x, c.z - b.z) * 0.12;
     if (o.zFollow) s -= Math.abs(c.z - b.z * 2.5) * 0.25;     // mids spread out to their own side of the field
-    if (losClear(ex, 1.6, 0, c.x, 1.0, c.z)) s -= 10;        // must hide you from their break
+    cands.push({ c, s });
+  }
+  cands.sort((a, q) => q.s - a.s);
+  let best = null, bs = -1e9;
+  for (const { c, s: s0 } of cands.slice(0, 12)) {
+    const s = s0 - (losClear(ex, 1.6, 0, c.x, 1.0, c.z) ? 10 : 0); // must hide you from their break
     if (s > bs) { bs = s; best = c; }
   }
   return best;
@@ -1245,6 +1268,8 @@ function aimFireAt(b, D, R, me, dt, x, y, z, sweep, errK = 1) {
   b.cd = D.rate * R.rope * rand(0.85, 1.15);
 }
 function botMove(b, dt, D, obj, foes, want) {
+  // off the whistle everyone reacts a moment apart (and the work of picking first bunkers is spread over frames)
+  if (roundTime < (b.startDelay || 0)) return;
   if (obj) {
     const ground = (b.y || 0) < 0.6;
     if (!obj.carry && !obj.drop && ground) {
@@ -1448,6 +1473,7 @@ function kothUpdate(dt) {
 // ---------- match flow ----------
 function beginMatch(diff) {
   initAudio();
+  warmShaders(); // cheap if the shaders are ready already
   matchDiff = DIFF[diff] ? diff : 'normal'; localPaused = false;
   score = [0, 0]; round = 1; feed = []; renderFeed(); flash = null;
   koth.capTime = [null, null];
