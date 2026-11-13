@@ -134,6 +134,8 @@ Small fields are 50 × 30 m. Every field has netting, team tents, flags, bleache
 
 Bots fight from cover: they sprint from bunker to bunker toward the enemy (or the objective), picking bunkers that hide them from the nearest threat and that teammates aren't already using. At each bunker they duck, then peek out to shoot (leaning round tall bunkers, standing up over low ones), and move up again after a few seconds, sooner if nobody is in sight. If they're flanked, they relocate.
 
+Bots keep paint going all the time. When they can see someone they shoot at them; when they can't, every time they peek out or run between bunkers they spray the bunker the nearest opponent is behind (or where someone just ducked), loosely aimed, so anyone who pokes out runs into paint. They zig-zag while shooting on the run, and carry 40-ball hoppers (60 for back players).
+
 In Elimination each bot has a role. Off the break, each one runs to its first bunker for that role; after that they play slowly and from cover: they only move to a bunker that hides them from the nearest opponent (avoiding long runs across an opponent's view), hold each bunker for several seconds and only moving up a set number of bunkers until the round drags on (40 s) or their team goes up by 2 and pushes.
 
 | Role | What it does |

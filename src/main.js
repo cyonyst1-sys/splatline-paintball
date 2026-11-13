@@ -34,7 +34,7 @@ const { renderer, scene, camera } = world;
 setVolume(save.settings.volume);
 
 const PR = 0.38, H_STAND = 1.8, H_CROUCH = 1.2, H_PRONE = 0.55, GRAV = 3.5, FALL_G = 22, WIN_ROUNDS = 3;
-const BOT = { ball: 46, mag: 20, reload: 1.6 };
+const BOT = { ball: 46, mag: 40, reload: 1.6 };
 const DIFF = {
   easy:   { err: 0.085, react: 0.9,  rate: 0.55, lead: 0.3,  speed: 3.6, sight: 28, reward: 0.75 },
   normal: { err: 0.055, react: 0.6,  rate: 0.36, lead: 0.6,  speed: 4.2, sight: 34, reward: 1 },
@@ -706,6 +706,13 @@ function coverAdvance(b, dt, D, target, foes, o) {
       }
       // sprint between bunkers; shoot on the run if someone's in view
       const a = followPath(b, goal, D.speed * (b.tgt ? 0.95 : 1.1) * (o.fast || 1), dt);
+      // shooting on the run: zig-zag so they're harder to hit
+      if (b.tgt || b.holdAim != null) {
+        b.strafeT -= dt;
+        if (b.strafeT <= 0) { b.strafe = -b.strafe; b.strafeT = rand(0.35, 0.8); }
+        const perp = a + Math.PI / 2 * b.strafe;
+        move(b, Math.cos(perp) * D.speed * 0.4 * dt, Math.sin(perp) * D.speed * 0.4 * dt, true);
+      }
       if (!b.tgt && o.lanes !== 'run') b.ang += angDiff(d < 2.5 && threat ? Math.atan2(threat.z - b.z, threat.x - b.x) : a, b.ang) * Math.min(1, dt * 6);
       b.stuckT += dt;
       if (b.stuckT > 0.9) {
@@ -744,9 +751,9 @@ function coverAdvance(b, dt, D, target, foes, o) {
     if (cv.peek) {
       // stay out while trading paint, but not forever
       if (b.tgt && b.ammo > 0 && cv.peekLen < 2.6) { cv.peekT = 0.3; cv.peekLen += 0.3; }
-      else { cv.peek = false; cv.peekT = o.duck ? rand(o.duck[0], o.duck[1]) : rand(0.6, 1.5); }
+      else { cv.peek = false; cv.peekT = o.duck ? rand(o.duck[0], o.duck[1]) : rand(0.4, 1.0); }
     } else {
-      cv.peek = true; cv.peekT = cv.peekLen = o.peek ? rand(o.peek[0], o.peek[1]) : rand(0.8, 1.6);
+      cv.peek = true; cv.peekT = cv.peekLen = o.peek ? rand(o.peek[0], o.peek[1]) : rand(1.8, 3.5);
       cv.supp = Math.random() < (o.suppress || 0); // lay down paint on their last spot even if they're hiding
       cv.low = false;
       if (!cv.highOk) cv.side = 0; // low bunker: pop up over the top
@@ -806,7 +813,7 @@ function pickBreakout(b, o) {
 // lanes: shoots lanes of paint down the field ('run' = even while running to the first bunker)
 const ROLE = {
   back:   { hold: [7, 12], step: 6, keepAway: 20, suppress: 1, rope: 0.5, dive: 0, fast: 0.85, patient: true,
-            budget: 0, budgetLate: 1, breakout: [14, 22, 10, 0.15], peek: [2.5, 4.5], duck: [0.4, 0.9], lanes: 'run', mag: 40 },
+            budget: 0, budgetLate: 1, breakout: [14, 22, 10, 0.15], peek: [2.5, 4.5], duck: [0.4, 0.9], lanes: 'run', mag: 60 },
   mid:    { hold: [6, 11], step: 8, keepAway: 11, suppress: 0.5, rope: 0.75, dive: 0.35, patient: true,
             budget: 2, breakout: [7, 14, 13, 0], zFollow: true, lanes: true },
   front:  { hold: [4.5, 8], step: 8, keepAway: 3, push: true, suppress: 0.2, rope: 1, dive: 0.85, fast: 1.15, patient: true,
@@ -832,11 +839,11 @@ function ownSnake(team, b) {
   return best;
 }
 // Battle's field is four times as big: the same roles move up further before the round is "late"
-const BATTLE_BUDGET = { back: 2, mid: 5, front: 4 };
+const BATTLE_BUDGET = { back: 3, mid: 7, front: 6 };
 function roleParams(role) {
   const R = ROLE[role];
   if (gameMode !== 'battle' || !R.breakout) return R;
-  return R.battle || (R.battle = { ...R, step: R.step * 1.35, budget: BATTLE_BUDGET[role], budgetLate: 0 });
+  return R.battle || (R.battle = { ...R, hold: [R.hold[0] * 0.7, R.hold[1] * 0.7], step: R.step * 1.5, budget: BATTLE_BUDGET[role], budgetLate: 0 });
 }
 // What a team does depends on the numbers: up by 2+ → push, down by 2+ (or alone against several) → defend.
 function assignRoles(team) {
@@ -859,7 +866,7 @@ function assignRoles(team) {
   if (n <= 4) roles = sets[plan][n - 1].slice();
   else {
     // big teams (Battle): the same idea as a percentage mix, plus a snake player for each of your snakes (up to 3)
-    const mix = { even: { back: 0.3, front: 0.15 }, behind: { back: 0.35, front: 0.05 }, push: { back: 0.2, front: 0.35 }, defend: { back: 0.3, anchor: 0.6 } }[plan];
+    const mix = { even: { back: 0.25, front: 0.22 }, behind: { back: 0.3, front: 0.1 }, push: { back: 0.15, front: 0.45 }, defend: { back: 0.3, anchor: 0.6 } }[plan];
     roles = [];
     for (const [r, f] of Object.entries(mix)) for (let k = 0; k < Math.round(n * f); k++) roles.push(r);
     if (plan !== 'defend') for (let k = 0; k < Math.min(3, snakesHere); k++) roles.push('snake');
@@ -1151,14 +1158,18 @@ function updateBot(b, dt) {
     }
   } else {
     b.seen = 0; b.pitch *= 0.9;
-    // no one in view: suppress where someone just ducked, or lay lanes down the field
-    if (R && b.cv && b.reload <= 0) {
-      const out = b.cv.peek || (R.lanes === 'run' && b.cv.mode === 'move');
-      if (out && !(b.cv.supp && suppress(b, D, R, me, dt)) && R.lanes && (b.cv.peek || R.lanes === 'run')) laneFire(b, D, R, me, dt);
+    // no one in clear view: keep paint going down range at the bunker the nearest opponent is behind (or where
+    // someone just ducked), whenever out of cover: peeking, running between bunkers, or out playing the objective
+    if (b.reload <= 0 && b.ammo > 0 && !b.crawl) {
+      const out = b.cv ? b.cv.peek || b.cv.mode === 'move' : true;
+      if (out && pressureFire(b, D, R, me, dt, foes)) b.holdAim = b.ang;
+      else if (out && R && R.lanes) laneFire(b, D, R, me, dt);
     }
   }
 
   botMove(b, dt, D, obj, foes, want);
+  // firing on the run: keep facing the target rather than the way they're running
+  if (b.holdAim != null) { b.ang = b.holdAim; b.holdAim = null; }
   b.crouch = !b.crawl && (b.reload > 0 || hunker || b.cvCrouch);
   if (b.crawl) b.cvLean = 0;
   b.lean += (b.cvLean - b.lean) * Math.min(1, dt * 8);
@@ -1192,8 +1203,32 @@ function laneFire(b, D, R, me, dt) {
   }
   if (b.laneP) aimFireAt(b, D, R, me, dt, b.laneP.x, 1.0, b.laneP.z, 1.6);
 }
+// Pressure fire: not careful aim, just paint on the bunker where the nearest opponent is (they know roughly where
+// the other team is), sweeping across it, so anyone who pokes out runs into it.
+const ROPE1 = { rope: 1 };
+function pressureFire(b, D, R, me, dt, foes) {
+  let tx, tz, ty = 1.1;
+  const L = b.lastSeen;
+  if (L && clock - L.t < 6) { tx = L.x; tz = L.z; ty = L.y; }
+  else {
+    let bd = Math.max(D.sight * 1.5, FIELD.hw > 60 ? 70 : 0); // the long Battle field: paint goes a long way down range
+    for (const f of foes) { const d = Math.hypot(f.x - b.x, f.z - b.z); if (d < bd) { bd = d; tx = f.x; tz = f.z; ty = chestY(f); } }
+  }
+  if (tx === undefined) return false;
+  const d = Math.hypot(tx - b.x, tz - b.z);
+  if (d < 3) return false;
+  // don't hose your own bunker: the first few metres of the shot must be clear
+  if (!(clock < b.pressChk)) {
+    b.pressChk = clock + 0.35;
+    const k = Math.min(1, 4 / d);
+    b.pressOk = losClear(b.x + me.x, eyeY(b) - 0.25, b.z + me.z, b.x + me.x + (tx - b.x) * k, eyeY(b) - 0.25 + (ty - eyeY(b)) * k, b.z + me.z + (tz - b.z) * k);
+  }
+  if (!b.pressOk) return false;
+  aimFireAt(b, D, R || ROPE1, me, dt, tx, ty, tz, 1.4, 2.2);
+  return true;
+}
 // turn toward a point (sweeping across it by up to `sweep` metres) and fire at the role's rope rate
-function aimFireAt(b, D, R, me, dt, x, y, z, sweep) {
+function aimFireAt(b, D, R, me, dt, x, y, z, sweep, errK = 1) {
   if (b.reload > 0 || b.ammo <= 0) return;
   const dx = x - b.x, dz = z - b.z, d = Math.hypot(dx, dz);
   const s = Math.sin(clock * 2.6 + b.i * 1.7) * sweep;
@@ -1202,8 +1237,8 @@ function aimFireAt(b, D, R, me, dt, x, y, z, sweep) {
   b.ang += da * Math.min(1, dt * 9);
   if (b.cd > 0 || Math.abs(da) > 0.25) return;
   const muzzleY = eyeY(b) - 0.25, ft = d / b.ballSpeed;
-  const pitch = Math.atan2(y + 0.5 * GRAV * ft * ft - muzzleY, d) + gauss() * D.err * 0.6;
-  const yaw = b.ang + gauss() * D.err;
+  const pitch = Math.atan2(y + 0.5 * GRAV * ft * ft - muzzleY, d) + gauss() * D.err * 0.6 * errK;
+  const yaw = b.ang + gauss() * D.err * errK;
   const dir = new THREE.Vector3(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
   const pos = new THREE.Vector3(b.x + me.x + Math.cos(b.ang) * 0.55, muzzleY, b.z + me.z + Math.sin(b.ang) * 0.55);
   fire(b, pos, dir.multiplyScalar(b.ballSpeed));
